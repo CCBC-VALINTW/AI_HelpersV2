@@ -1,5 +1,6 @@
 using AiHelpers.Components;
 using AiHelpers.Data;
+using AiHelpers.Services;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -10,6 +11,8 @@ builder.Services.AddRazorComponents()
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("AiHelpers")));
+
+builder.Services.AddScoped<ICurrentUserService, DevCurrentUserService>();
 
 var app = builder.Build();
 

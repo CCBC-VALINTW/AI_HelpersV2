@@ -1,0 +1,173 @@
+@page "/helpers/{Id:int}"
+@rendermode InteractiveServer
+@using AiHelpers.Data
+@using AiHelpers.Data.Enums
+@using AiHelpers.Services
+@using Microsoft.EntityFrameworkCore
+@inject AppDbContext Db
+@inject ICurrentUserService CurrentUser
+
+<PageTitle>@(_helper?.Name ?? "Helper")</PageTitle>
+
+@if (_loading)
+{
+    <p><em>Loading…</em></p>
+}
+else if (_helper is null)
+{
+    <h1>Not found</h1>
+    <p class="text-muted">This Helper doesn't exist, or isn't shared with you.</p>
+    <a href="/helpers" class="btn btn-outline-secondary">Back to Helpers</a>
+}
+else
+{
+    <div class="d-flex justify-content-between align-items-start mb-3">
+        <div>
+            <h1 class="mb-1">@_helper.Name</h1>
+            <p class="text-muted mb-0">@_helper.Description</p>
+        </div>
+        <span class="badge @(_helper.Scope == HelperScope.General ? "text-bg-primary" : "text-bg-secondary") fs-6">
+            @_helper.Scope
+        </span>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-8">
+            <div class="card mb-4">
+                <div class="card-header">Run this Helper</div>
+                <div class="card-body">
+                    <label class="form-label" for="helperInput">Your input</label>
+                    <textarea id="helperInput" class="form-control mb-3" rows="6" @bind="_input"
+                              placeholder="Describe what you'd like this Helper to do…"></textarea>
+                    <button class="btn btn-primary" @onclick="RunHelper" disabled="@_running">
+                        @(_running ? "Running…" : "Run")
+                    </button>
+
+                    @if (_runMessage is not null)
+                    {
+                        <div class="alert alert-info mt-3 mb-0">@_runMessage</div>
+                    }
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">Configuration</div>
+                <div class="card-body">
+                    @RenderField("Primary purpose", _helper.PrimaryPurpose)
+                    @RenderField("Methodology", _helper.Methodology)
+                    @RenderField("Style / tone", _helper.StyleTone)
+                    @RenderField("Output format", _helper.OutputFormat)
+                    @RenderField("Target audience", _helper.TargetAudience)
+                    @RenderField("Special instructions", _helper.SpecialInstructions)
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-4">
+            <div class="card mb-3">
+                <div class="card-header">Model</div>
+                <div class="card-body">
+                    @if (_helper.IsExternal)
+                    {
+                        <p class="mb-1"><strong>External Helper</strong></p>
+                        <p class="text-muted small mb-0">Proxies to an external service rather than calling an LLM directly.</p>
+                    }
+                    else if (_helper.LlmDefinition is not null)
+                    {
+                        <p class="mb-1"><strong>@_helper.LlmDefinition.Name</strong></p>
+                        <p class="text-muted small mb-2">@_helper.LlmDefinition.Description</p>
+                        <div class="d-flex flex-wrap gap-1 mb-2">
+                            @if (_helper.LlmDefinition.SupportsText) { <span class="badge text-bg-light border">Text</span> }
+                            @if (_helper.LlmDefinition.SupportsDocument) { <span class="badge text-bg-light border">Document</span> }
+                            @if (_helper.LlmDefinition.SupportsImage) { <span class="badge text-bg-light border">Image</span> }
+                            @if (_helper.SupportsReasoning) { <span class="badge text-bg-light border">Reasoning</span> }
+                        </div>
+                        <p class="text-muted small mb-0">Residency: @_helper.LlmDefinition.Residency</p>
+                    }
+                    else
+                    {
+                        <p class="text-muted mb-0">No model configured.</p>
+                    }
+                </div>
+            </div>
+
+            @if (_helper.HelperCategory is not null)
+            {
+                <div class="card mb-3">
+                    <div class="card-header">Category</div>
+                    <div class="card-body">
+                        <p class="mb-0">@_helper.HelperCategory.Name</p>
+                    </div>
+                </div>
+            }
+
+            @if (_helper.HasKnowledge || _helper.AllowContext)
+            {
+                <div class="card">
+                    <div class="card-header">Extras</div>
+                    <div class="card-body">
+                        @if (_helper.HasKnowledge) { <p class="mb-1">📚 Uses a knowledge source</p> }
+                        @if (_helper.AllowContext) { <p class="mb-0">💬 Supports conversation context</p> }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="mt-4">
+        <a href="/helpers" class="btn btn-outline-secondary">Back to Helpers</a>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private bool _loading = true;
+    private Data.Entities.HelperDefinition? _helper;
+    private string _input = string.Empty;
+    private bool _running;
+    private string? _runMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var email = CurrentUser.Email;
+
+        _helper = await Db.HelperDefinitions
+            .Include(h => h.HelperCategory)
+            .Include(h => h.LlmDefinition)
+            .Where(h => h.Id == Id && (h.Scope == HelperScope.General || h.OwnerEmail == email))
+            .FirstOrDefaultAsync();
+
+        _loading = false;
+    }
+
+    private async Task RunHelper()
+    {
+        _running = true;
+        _runMessage = null;
+        StateHasChanged();
+
+        // Placeholder: no LLM provider is wired up yet. This is where the
+        // direct-call/streaming path replaces V1's CallbackTable polling.
+        await Task.Delay(400);
+
+        _runMessage = "This Helper isn't connected to an LLM provider yet - running it is a later milestone.";
+        _running = false;
+    }
+
+    private static RenderFragment RenderField(string label, string? value) => builder =>
+    {
+        if (string.IsNullOrWhiteSpace(value)) return;
+
+        builder.OpenElement(0, "div");
+        builder.AddAttribute(1, "class", "mb-3");
+        builder.OpenElement(2, "div");
+        builder.AddAttribute(3, "class", "text-muted small text-uppercase");
+        builder.AddContent(4, label);
+        builder.CloseElement();
+        builder.OpenElement(5, "div");
+        builder.AddContent(6, value);
+        builder.CloseElement();
+        builder.CloseElement();
+    };
+}

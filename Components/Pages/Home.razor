@@ -1,7 +1,101 @@
-﻿@page "/"
+@page "/"
+@rendermode InteractiveServer
+@using AiHelpers.Data
+@using AiHelpers.Data.Enums
+@using AiHelpers.Services
+@using Microsoft.EntityFrameworkCore
+@inject AppDbContext Db
+@inject ICurrentUserService CurrentUser
 
-<PageTitle>Home</PageTitle>
+<PageTitle>AI Helpers</PageTitle>
 
-<h1>Hello, world!</h1>
+<h1>AI Helpers</h1>
+<p class="text-muted">Welcome back, @CurrentUser.DisplayName.</p>
 
-Welcome to your new app.
+@if (_loading)
+{
+    <p><em>Loading…</em></p>
+}
+else
+{
+    <div class="row g-3 mb-4">
+        <div class="col-sm-4">
+            <div class="card text-center">
+                <div class="card-body">
+                    <div class="display-6">@_generalCount</div>
+                    <div class="text-muted">General Helpers</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-sm-4">
+            <div class="card text-center">
+                <div class="card-body">
+                    <div class="display-6">@_myCount</div>
+                    <div class="text-muted">Your Helpers</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-sm-4">
+            <div class="card text-center">
+                <div class="card-body">
+                    <div class="display-6">@_categories.Count</div>
+                    <div class="text-muted">Categories</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <a href="/helpers" class="btn btn-primary mb-4">Browse all Helpers</a>
+
+    <h2 class="h4">Categories</h2>
+    @if (_categories.Count == 0)
+    {
+        <p class="text-muted">No categories yet.</p>
+    }
+    else
+    {
+        <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-3">
+            @foreach (var (category, count) in _categories)
+            {
+                <div class="col">
+                    <a href="@($"/helpers?category={category.Id}")" class="text-decoration-none">
+                        <div class="card h-100">
+                            <div class="card-body">
+                                <h5 class="card-title">@category.Name</h5>
+                                <p class="card-text text-muted small">@count Helper@(count == 1 ? "" : "s")</p>
+                            </div>
+                        </div>
+                    </a>
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    private bool _loading = true;
+    private int _generalCount;
+    private int _myCount;
+    private List<(Data.Entities.HelperCategory Category, int Count)> _categories = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var email = CurrentUser.Email;
+
+        var visibleHelpers = await Db.HelperDefinitions
+            .Where(h => h.Scope == HelperScope.General || h.OwnerEmail == email)
+            .Select(h => new { h.Scope, h.HelperCategoryId })
+            .ToListAsync();
+
+        _generalCount = visibleHelpers.Count(h => h.Scope == HelperScope.General);
+        _myCount = visibleHelpers.Count(h => h.Scope == HelperScope.Personal);
+
+        var categories = await Db.HelperCategories.OrderBy(c => c.Name).ToListAsync();
+        _categories = categories
+            .Select(c => (c, visibleHelpers.Count(h => h.HelperCategoryId == c.Id)))
+            .Where(x => x.Item2 > 0)
+            .ToList();
+
+        _loading = false;
+    }
+}
