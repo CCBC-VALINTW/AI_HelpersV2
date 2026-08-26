@@ -13,8 +13,9 @@ public class HelperDefinition
     public required string Name { get; set; }
     public string? Description { get; set; }
 
-    public int LlmDefinitionId { get; set; }
-    public LlmDefinition LlmDefinition { get; set; } = null!;
+    /// <summary>Null only when IsExternal is true - external helpers proxy to a URL instead of calling an LLM.</summary>
+    public int? LlmDefinitionId { get; set; }
+    public LlmDefinition? LlmDefinition { get; set; }
 
     public decimal? Temperature { get; set; }
     public decimal? TopP { get; set; }

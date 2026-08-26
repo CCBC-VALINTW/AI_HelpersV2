@@ -35,7 +35,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(p => p.InputTokenCost).HasPrecision(8, 5);
             e.Property(p => p.OutputTokenCost).HasPrecision(8, 5);
             e.Property(p => p.Residency).HasConversion<string>().HasMaxLength(10);
-            e.HasIndex(p => p.Identifier).IsUnique();
+            // Not unique: multiple named definitions (e.g. a pinned version vs. a "latest stable"
+            // alias) can legitimately point at the same underlying provider model identifier.
+            e.HasIndex(p => p.Identifier);
         });
 
         modelBuilder.Entity<Stylesheet>(e =>
@@ -60,7 +62,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasOne(p => p.LlmDefinition)
                 .WithMany(l => l.Helpers)
                 .HasForeignKey(p => p.LlmDefinitionId)
-                .OnDelete(DeleteBehavior.Restrict);
+                .OnDelete(DeleteBehavior.SetNull);
 
             e.HasOne(p => p.HelperCategory)
                 .WithMany(c => c.Helpers)
