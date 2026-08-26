@@ -1,19 +1,56 @@
+/* Conwy County Borough Council corporate palette - see Design brief/Conwy Corporate Style Guide.
+   Only official colours from the guide are used here (main brand colours + its complementary
+   ramp + base/text colour) - no invented shades. */
+:root {
+    --conwy-green: #00927e;
+    --conwy-purple: #7c76b7;
+    --conwy-ramp-1: #565f90;
+    --conwy-ramp-2: #31597c;
+    --conwy-ramp-3: #158ab5;
+    --conwy-ramp-4: #1da6be;
+    --conwy-ramp-5: #24b7ba;
+    --conwy-ramp-6: #29b5a3;
+    --conwy-base: #3f4851;
+
+    --bs-body-font-family: Calibri, Arial, sans-serif;
+    --bs-primary: var(--conwy-purple);
+    --bs-primary-rgb: 125, 118, 183;
+    --bs-link-color-rgb: 0, 146, 126;
+    --bs-link-hover-color-rgb: 49, 89, 124;
+    --bs-body-color: var(--conwy-base);
+}
+
 html, body {
-    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-family: var(--bs-body-font-family);
 }
 
 a, .btn-link {
-    color: #006bb7;
+    color: var(--conwy-green);
 }
 
 .btn-primary {
-    color: #fff;
-    background-color: #1b6ec2;
-    border-color: #1861ac;
+    --bs-btn-color: #fff;
+    --bs-btn-bg: var(--conwy-purple);
+    --bs-btn-border-color: var(--conwy-purple);
+    --bs-btn-hover-bg: var(--conwy-ramp-1);
+    --bs-btn-hover-border-color: var(--conwy-ramp-1);
+    --bs-btn-active-bg: var(--conwy-ramp-1);
+    --bs-btn-active-border-color: var(--conwy-ramp-1);
+    --bs-btn-focus-shadow-rgb: 125, 118, 183;
+}
+
+.btn-outline-primary {
+    --bs-btn-color: var(--conwy-purple);
+    --bs-btn-border-color: var(--conwy-purple);
+    --bs-btn-hover-bg: var(--conwy-purple);
+    --bs-btn-hover-border-color: var(--conwy-purple);
+    --bs-btn-active-bg: var(--conwy-purple);
+    --bs-btn-active-border-color: var(--conwy-purple);
+    --bs-btn-focus-shadow-rgb: 125, 118, 183;
 }
 
 .btn:focus, .btn:active:focus, .btn-link.nav-link:focus, .form-control:focus, .form-check-input:focus {
-  box-shadow: 0 0 0 0.1rem white, 0 0 0 0.25rem #258cfb;
+  box-shadow: 0 0 0 0.1rem white, 0 0 0 0.25rem var(--conwy-purple);
 }
 
 .content {
