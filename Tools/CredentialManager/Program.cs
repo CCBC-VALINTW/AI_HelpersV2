@@ -73,10 +73,18 @@ static async Task<int> VerifyAsync(ICredentialStore store, LlmProvider providerN
     // Decrypts successfully and shows just enough to confirm it's the right one - never the
     // secret itself.
     Console.WriteLine($"Provider: {providerName}");
-    Console.WriteLine($"AccessKeyId: {Mask(payload.AccessKeyId)}");
     Console.WriteLine($"Region: {payload.Region}");
-    Console.WriteLine($"SecretAccessKey: set, {payload.SecretAccessKey.Length} characters");
-    Console.WriteLine($"SessionToken: {(payload.SessionToken is null ? "not set" : $"set, {payload.SessionToken.Length} characters")}");
+    if (payload.BearerToken is not null)
+    {
+        Console.WriteLine($"Auth style: bearer token, {Mask(payload.BearerToken)}");
+    }
+    else
+    {
+        Console.WriteLine($"Auth style: access key / secret");
+        Console.WriteLine($"AccessKeyId: {Mask(payload.AccessKeyId ?? "")}");
+        Console.WriteLine($"SecretAccessKey: set, {payload.SecretAccessKey?.Length ?? 0} characters");
+        Console.WriteLine($"SessionToken: {(payload.SessionToken is null ? "not set" : $"set, {payload.SessionToken.Length} characters")}");
+    }
     return 0;
 
     static string Mask(string value) => value.Length <= 4 ? "****" : value[..4] + new string('*', value.Length - 4);
@@ -84,23 +92,34 @@ static async Task<int> VerifyAsync(ICredentialStore store, LlmProvider providerN
 
 static async Task SetAwsCredentialAsync(ICredentialStore store, string createdBy)
 {
-    Console.Write("AWS Access Key ID: ");
-    var accessKeyId = (Console.ReadLine() ?? "").Trim();
+    Console.Write("Auth style - (B)earer token or (K)ey/secret? [B]: ");
+    var useBearer = (Console.ReadLine() ?? "").Trim().ToUpperInvariant() is not "K";
 
-    var secretAccessKey = ReadMasked("AWS Secret Access Key: ");
-
-    Console.Write("AWS Region (e.g. eu-west-2): ");
-    var region = (Console.ReadLine() ?? "").Trim();
-
-    var sessionToken = ReadMasked("Session token (blank if using a long-lived IAM user key): ");
-
-    var payload = new AwsCredentialPayload
+    AwsCredentialPayload payload;
+    if (useBearer)
     {
-        AccessKeyId = accessKeyId,
-        SecretAccessKey = secretAccessKey,
-        Region = region,
-        SessionToken = string.IsNullOrWhiteSpace(sessionToken) ? null : sessionToken
-    };
+        var bearerToken = ReadMasked("Bearer token: ");
+        Console.Write("AWS Region (e.g. eu-west-2): ");
+        var region = (Console.ReadLine() ?? "").Trim();
+        payload = new AwsCredentialPayload { Region = region, BearerToken = bearerToken };
+    }
+    else
+    {
+        Console.Write("AWS Access Key ID: ");
+        var accessKeyId = (Console.ReadLine() ?? "").Trim();
+        var secretAccessKey = ReadMasked("AWS Secret Access Key: ");
+        Console.Write("AWS Region (e.g. eu-west-2): ");
+        var region = (Console.ReadLine() ?? "").Trim();
+        var sessionToken = ReadMasked("Session token (blank if using a long-lived IAM user key): ");
+
+        payload = new AwsCredentialPayload
+        {
+            AccessKeyId = accessKeyId,
+            SecretAccessKey = secretAccessKey,
+            Region = region,
+            SessionToken = string.IsNullOrWhiteSpace(sessionToken) ? null : sessionToken
+        };
+    }
 
     await store.SetDefaultAsync(LlmProvider.AwsBedrock, "Default", payload, createdBy);
 }
