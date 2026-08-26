@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using AiHelpers.Components;
 using AiHelpers.Data;
+using AiHelpers.Providers;
+using AiHelpers.Providers.Bedrock;
 using AiHelpers.Services;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
@@ -58,6 +60,10 @@ builder.Services.AddDataProtection()
 
 builder.Services.AddScoped<ICurrentUserService, EntraCurrentUserService>();
 builder.Services.AddScoped<ICredentialStore, CredentialStore>();
+
+builder.Services.AddHttpClient<BedrockAdapter>();
+builder.Services.AddScoped<ILlmProviderAdapter, BedrockAdapter>();
+builder.Services.AddScoped<IHelperInvocationService, HelperInvocationService>();
 
 var app = builder.Build();
 

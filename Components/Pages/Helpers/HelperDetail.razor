@@ -1,11 +1,13 @@
 @page "/helpers/{Id:int}"
 @rendermode InteractiveServer
+@using AiHelpers.Contracts
 @using AiHelpers.Data
 @using AiHelpers.Data.Enums
 @using AiHelpers.Services
 @using Microsoft.EntityFrameworkCore
 @inject AppDbContext Db
 @inject ICurrentUserService CurrentUser
+@inject IHelperInvocationService InvocationService
 
 <PageTitle>@(_helper?.Name ?? "Helper")</PageTitle>
 
@@ -43,9 +45,21 @@ else
                         @(_running ? "Running…" : "Run")
                     </button>
 
-                    @if (_runMessage is not null)
+                    @if (_errorMessage is not null)
                     {
-                        <div class="alert alert-info mt-3 mb-0">@_runMessage</div>
+                        <div class="alert alert-danger mt-3 mb-0">@_errorMessage</div>
+                    }
+                    else if (_budgetExceeded)
+                    {
+                        <div class="alert alert-warning mt-3 mb-0">
+                            Monthly AI spend cap reached (£@_spend.ToString("0.00") of £@_cap.ToString("0.00")). Contact your service admin if you need this raised.
+                        </div>
+                    }
+                    else if (_output is not null)
+                    {
+                        <div class="border rounded p-3 mt-3 helper-output">
+                            @((MarkupString)_output)
+                        </div>
                     }
                 </div>
             </div>
@@ -126,7 +140,11 @@ else
     private Data.Entities.HelperDefinition? _helper;
     private string _input = string.Empty;
     private bool _running;
-    private string? _runMessage;
+    private string? _errorMessage;
+    private bool _budgetExceeded;
+    private decimal _spend;
+    private decimal _cap;
+    private string? _output;
 
     protected override async Task OnInitializedAsync()
     {
@@ -143,15 +161,23 @@ else
 
     private async Task RunHelper()
     {
+        if (_helper is null) return;
+
         _running = true;
-        _runMessage = null;
+        _errorMessage = null;
+        _budgetExceeded = false;
+        _output = null;
         StateHasChanged();
 
-        // Placeholder: no LLM provider is wired up yet. This is where the
-        // direct-call/streaming path replaces V1's CallbackTable polling.
-        await Task.Delay(400);
+        var email = await CurrentUser.GetEmailAsync();
+        var outcome = await InvocationService.RunAsync(_helper, _input, email);
 
-        _runMessage = "This Helper isn't connected to an LLM provider yet - running it is a later milestone.";
+        _budgetExceeded = outcome.BudgetExceeded;
+        _spend = outcome.Spend;
+        _cap = outcome.Cap;
+        _errorMessage = outcome.ErrorMessage;
+        _output = outcome.Response?.Documents.FirstOrDefault()?.Content;
+
         _running = false;
     }
 
