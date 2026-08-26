@@ -9,7 +9,7 @@
 
   <title id="badgeTitle">Built by Conwy bilingual badge</title>
   <desc id="badgeDescription">
-    A bilingual Built by and Wedi'i Greu gan badge,
+    A bilingual Creu Gan and Built By badge (Welsh first),
     with a tick on the left and the official Conwy logo on the right.
   </desc>
 
@@ -24,10 +24,10 @@
 
     .welsh {
       font-family: "Arial", "Helvetica Neue", sans-serif;
-      font-size: 25px;
-      font-weight: 600;
-      letter-spacing: 0.4px;
-      fill: #42484f;
+      font-size: 34px;
+      font-weight: 700;
+      letter-spacing: 1.6px;
+      fill: #17365d;
     }
   </style>
 
@@ -57,19 +57,19 @@
     stroke-linecap="round"
     stroke-linejoin="round" />
 
-  <!-- Bilingual wording -->
+  <!-- Bilingual wording - Welsh first -->
   <text
     x="145"
-    y="80"
-    class="english">
-    BUILT BY
+    y="76"
+    class="welsh">
+    CREU GAN
   </text>
 
   <text
     x="145"
     y="118"
-    class="welsh">
-    WEDI'I GREU GAN
+    class="english">
+    BUILT BY
   </text>
 
   <!-- Divider -->
