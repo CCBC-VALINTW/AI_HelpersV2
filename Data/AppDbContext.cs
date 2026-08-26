@@ -1,10 +1,11 @@
 using AiHelpers.Data.Entities;
 using AiHelpers.Data.Enums;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 namespace AiHelpers.Data;
 
-public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
+public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options), IDataProtectionKeyContext
 {
     public DbSet<HelperCategory> HelperCategories => Set<HelperCategory>();
     public DbSet<LlmDefinition> LlmDefinitions => Set<LlmDefinition>();
@@ -16,6 +17,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<PersonalityPrompt> PersonalityPrompts => Set<PersonalityPrompt>();
     public DbSet<SpendCap> SpendCaps => Set<SpendCap>();
     public DbSet<ArticleStoreItem> ArticleStoreItems => Set<ArticleStoreItem>();
+    public DbSet<ProviderCredential> ProviderCredentials => Set<ProviderCredential>();
+    public DbSet<Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey> DataProtectionKeys => Set<Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -140,6 +143,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(p => p.Category).HasMaxLength(64);
             e.Property(p => p.Access).HasMaxLength(128);
             e.Property(p => p.Title).HasMaxLength(128).IsRequired();
+        });
+
+        modelBuilder.Entity<ProviderCredential>(e =>
+        {
+            e.Property(p => p.Provider).HasConversion<string>().HasMaxLength(20);
+            e.Property(p => p.Name).HasMaxLength(128).IsRequired();
+            e.Property(p => p.CreatedBy).HasMaxLength(256);
+            // At most one default credential per provider.
+            e.HasIndex(p => p.Provider).IsUnique().HasFilter("[IsDefault] = 1");
         });
     }
 }
