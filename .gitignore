@@ -6,6 +6,9 @@
 # dotenv files
 .env
 
+# Contains sensitive schema/integration info and example credentials - never commit
+/Project Info/
+
 # User-specific files
 *.rsuser
 *.suo
