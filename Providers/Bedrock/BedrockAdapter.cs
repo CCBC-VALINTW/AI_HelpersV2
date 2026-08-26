@@ -99,9 +99,7 @@ public class BedrockAdapter(HttpClient httpClient, ICredentialStore credentialSt
                 })
         };
 
-        // When Effort engages reasoning, drop Creativity/Adherence entirely rather than send
-        // them alongside thinking config - Anthropic's extended-thinking mode on Bedrock
-        // rejects temperature/top_p being set alongside it, this isn't just our own preference.
+        // When Effort engages reasoning, request thinking config.
         if (helper.Effort is { } effort && model.SupportsReasoning)
         {
             var maxBudget = model.ReasoningTokens ?? 4096;
@@ -122,25 +120,14 @@ public class BedrockAdapter(HttpClient httpClient, ICredentialStore credentialSt
                 }
             };
         }
-        else if (model.SupportsSamplingControl)
-        {
-            // Anthropic's own guidance has always been to adjust temperature or top_p, never
-            // both - Bedrock now hard-enforces this for at least some models ("temperature and
-            // top_p cannot both be specified"). If the Helper explicitly set Adherence but left
-            // Creativity unset, respect that; otherwise default to temperature, the more
-            // commonly tuned dial.
-            if (helper.Adherence is { } adherence && helper.Creativity is null)
-            {
-                body["inferenceConfig"] = new JsonObject { ["topP"] = adherence };
-            }
-            else
-            {
-                var temperature = helper.Creativity ?? model.DefaultCreativity;
-                body["inferenceConfig"] = new JsonObject { ["temperature"] = temperature };
-            }
-        }
-        // else: model doesn't accept sampling params at all - send neither, let it use its
-        // own defaults. Don't infer this from SupportsReasoning; confirmed independent.
+
+        // Deliberately never send temperature/top_p (Creativity/Adherence) - Will already went
+        // through this exact fight in V1 and concluded it wasn't worth it: different Bedrock
+        // models reject sampling params in different, inconsistent ways (some reject them
+        // entirely, some reject temperature+top_p together but accept one, presumably more
+        // variations exist). Rather than chase each one as it surfaces, models just use their
+        // own defaults. Creativity/Adherence stay in the schema (real V1 data, may matter for a
+        // future non-Bedrock provider) but Bedrock calls never reference them.
 
         return body;
     }
