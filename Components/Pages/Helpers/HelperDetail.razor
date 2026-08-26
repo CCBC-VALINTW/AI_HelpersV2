@@ -130,7 +130,7 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        var email = CurrentUser.Email;
+        var email = await CurrentUser.GetEmailAsync();
 
         _helper = await Db.HelperDefinitions
             .Include(h => h.HelperCategory)

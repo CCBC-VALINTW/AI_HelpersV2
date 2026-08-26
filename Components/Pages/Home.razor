@@ -10,7 +10,7 @@
 <PageTitle>AI Helpers</PageTitle>
 
 <h1>AI Helpers</h1>
-<p class="text-muted">Welcome back, @CurrentUser.DisplayName.</p>
+<p class="text-muted">Welcome back, @_displayName.</p>
 
 @if (_loading)
 {
@@ -74,13 +74,15 @@ else
 
 @code {
     private bool _loading = true;
+    private string _displayName = "";
     private int _generalCount;
     private int _myCount;
     private List<(Data.Entities.HelperCategory Category, int Count)> _categories = [];
 
     protected override async Task OnInitializedAsync()
     {
-        var email = CurrentUser.Email;
+        _displayName = await CurrentUser.GetDisplayNameAsync();
+        var email = await CurrentUser.GetEmailAsync();
 
         var visibleHelpers = await Db.HelperDefinitions
             .Where(h => h.Scope == HelperScope.General || h.OwnerEmail == email)

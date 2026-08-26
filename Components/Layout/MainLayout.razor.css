@@ -42,6 +42,12 @@ main {
         margin-left: 1.5rem;
     }
 
+    .top-row ::deep .signed-in-as {
+        color: var(--conwy-base, #3f4851);
+        font-size: 0.85rem;
+        margin-left: 1.5rem;
+    }
+
 @media (max-width: 640.98px) {
     .top-row {
         justify-content: space-between;
