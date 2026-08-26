@@ -8,16 +8,6 @@ main {
     flex: 1;
 }
 
-.app-footer {
-    padding-top: 2rem;
-    padding-bottom: 1.5rem;
-}
-
-    .app-footer img {
-        height: 60px;
-        width: auto;
-    }
-
 .sidebar {
     background-image: linear-gradient(180deg, var(--conwy-ramp-2) 0%, var(--conwy-ramp-1) 70%);
 }
@@ -44,6 +34,12 @@ main {
     .top-row ::deep a:first-child {
         overflow: hidden;
         text-overflow: ellipsis;
+    }
+
+    .top-row ::deep .built-by-badge {
+        height: 34px;
+        width: auto;
+        margin-left: 1.5rem;
     }
 
 @media (max-width: 640.98px) {
