@@ -23,6 +23,9 @@ public class LlmDefinition
     public bool SupportsText { get; set; }
     public bool SupportsDocument { get; set; }
     public bool SupportsImage { get; set; }
+    /// <summary>Whether this model can be forced to emit JSON conforming to a supplied schema
+    /// (e.g. via Bedrock's tool-forcing), rather than relying on prompting alone.</summary>
+    public bool SupportsStructuredOutput { get; set; }
 
     public decimal? InputTokenCost { get; set; }
     public decimal? OutputTokenCost { get; set; }

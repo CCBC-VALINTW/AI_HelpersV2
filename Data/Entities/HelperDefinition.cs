@@ -61,6 +61,14 @@ public class HelperDefinition
     public bool IsExternal { get; set; }
     public string? ExternalUrl { get; set; }
 
+    /// <summary>
+    /// A JSON Schema the model's structured output must conform to, written into
+    /// HelperResponse.Data. Null means this Helper doesn't produce structured data - not to be
+    /// confused with OutputFormat, which is a free-text prompt instruction, not a real schema.
+    /// Ignored by the adapter when LlmDefinition.SupportsStructuredOutput is false.
+    /// </summary>
+    public string? OutputSchemaJson { get; set; }
+
     public ICollection<AccountingEntry> AccountingEntries { get; set; } = [];
     public ICollection<CallbackEntry> CallbackEntries { get; set; } = [];
     public ICollection<Feedback> FeedbackEntries { get; set; } = [];
