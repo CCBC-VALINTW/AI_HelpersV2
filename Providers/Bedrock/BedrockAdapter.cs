@@ -124,13 +124,20 @@ public class BedrockAdapter(HttpClient httpClient, ICredentialStore credentialSt
         }
         else if (model.SupportsSamplingControl)
         {
-            var temperature = helper.Creativity ?? model.DefaultCreativity;
-            var topP = helper.Adherence ?? model.DefaultAdherence;
-            body["inferenceConfig"] = new JsonObject
+            // Anthropic's own guidance has always been to adjust temperature or top_p, never
+            // both - Bedrock now hard-enforces this for at least some models ("temperature and
+            // top_p cannot both be specified"). If the Helper explicitly set Adherence but left
+            // Creativity unset, respect that; otherwise default to temperature, the more
+            // commonly tuned dial.
+            if (helper.Adherence is { } adherence && helper.Creativity is null)
             {
-                ["temperature"] = temperature,
-                ["topP"] = topP
-            };
+                body["inferenceConfig"] = new JsonObject { ["topP"] = adherence };
+            }
+            else
+            {
+                var temperature = helper.Creativity ?? model.DefaultCreativity;
+                body["inferenceConfig"] = new JsonObject { ["temperature"] = temperature };
+            }
         }
         // else: model doesn't accept sampling params at all - send neither, let it use its
         // own defaults. Don't infer this from SupportsReasoning; confirmed independent.
