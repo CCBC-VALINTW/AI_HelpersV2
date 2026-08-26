@@ -15,6 +15,18 @@ namespace AiHelpers.Providers.Bedrock;
 /// </summary>
 public class BedrockAdapter(HttpClient httpClient, ICredentialStore credentialStore) : ILlmProviderAdapter
 {
+    // Without this, models default to a chat-assistant persona - intro remarks, markdown code
+    // fences around the actual content, a follow-up question - none of which belongs in a
+    // document. V1 had an equivalent mandatory instruction baked into every GovService
+    // integration template; this is the V2 equivalent, minimal rather than copying V1's full
+    // boilerplate (HTML wrapper div, review-status footer table) which was GovService-specific
+    // scaffolding, not a real requirement. TODO: move to a provider-agnostic location once a
+    // second ILlmProviderAdapter exists - this instruction isn't Bedrock-specific.
+    private const string BaselineInstruction =
+        "Respond with only the requested content. Do not add introductory or closing remarks, " +
+        "do not ask follow-up questions, and do not wrap your response in markdown code fences " +
+        "- your entire response is inserted directly into a document as-is.";
+
     public LlmProvider Provider => LlmProvider.AwsBedrock;
 
     public async Task<LlmInvocationResult> InvokeAsync(LlmInvocationRequest request, CancellationToken cancellationToken = default)
@@ -67,6 +79,7 @@ public class BedrockAdapter(HttpClient httpClient, ICredentialStore credentialSt
     {
         var systemPrompts = new[]
         {
+            BaselineInstruction,
             helper.PrimaryPurpose,
             helper.Methodology,
             helper.StyleTone,

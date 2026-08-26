@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using AiHelpers.Contracts;
 using AiHelpers.Data;
 using AiHelpers.Data.Entities;
@@ -72,10 +73,23 @@ public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAd
         var response = new HelperResponse
         {
             SuggestedFileName = helper.Name,
-            Documents = [new Document { Type = DocumentType.Html, Name = helper.Name, Content = result.Text }]
+            Documents = [new Document { Type = DocumentType.Html, Name = helper.Name, Content = ExtractContent(result.Text) }]
         };
 
         return new HelperInvocationOutcome { Response = response, Spend = spend, Cap = cap };
+    }
+
+    /// <summary>
+    /// Defensive backstop for when a model wraps its response in a markdown code fence plus
+    /// chat-style commentary (an intro line, a follow-up question) despite being told not to -
+    /// prompt-following alone isn't fully reliable. If a fenced block is present anywhere in the
+    /// response, keeps only its contents and discards the surrounding commentary; otherwise
+    /// returns the response as-is.
+    /// </summary>
+    private static string ExtractContent(string text)
+    {
+        var match = Regex.Match(text, "```[a-zA-Z]*\\s*\\n(.*?)\\n```", RegexOptions.Singleline);
+        return (match.Success ? match.Groups[1].Value : text).Trim();
     }
 
     private async Task<(decimal Spend, decimal Cap)> GetSpendAndCapAsync(string userEmail, CancellationToken cancellationToken)
