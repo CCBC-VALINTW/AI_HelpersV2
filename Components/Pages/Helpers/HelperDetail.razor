@@ -57,9 +57,7 @@ else
                     }
                     else if (_output is not null)
                     {
-                        <div class="border rounded p-3 mt-3 helper-output">
-                            @((MarkupString)_output)
-                        </div>
+                        <iframe class="border rounded mt-3 helper-output" srcdoc="@BuildOutputDocument(_output)" sandbox=""></iframe>
                     }
                 </div>
             </div>
@@ -180,6 +178,23 @@ else
 
         _running = false;
     }
+
+    /// <summary>
+    /// Wraps model output as a standalone HTML document for an iframe. This is genuine
+    /// browser-level isolation, not a convention the model has to cooperate with - unlike V1's
+    /// "wrap everything in a rendDoc div" prompt instruction, a &lt;style&gt; block inside here
+    /// cannot leak out to (or be affected by) the host page, and sandbox="" blocks scripts.
+    /// </summary>
+    private static string BuildOutputDocument(string bodyHtml) => $$"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+        <meta charset="utf-8" />
+        <style>body { font-family: Calibri, Arial, sans-serif; margin: 1rem; }</style>
+        </head>
+        <body>{{bodyHtml}}</body>
+        </html>
+        """;
 
     private static RenderFragment RenderField(string label, string? value) => builder =>
     {
