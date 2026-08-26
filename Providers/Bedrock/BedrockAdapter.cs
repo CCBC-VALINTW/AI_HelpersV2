@@ -109,7 +109,7 @@ public class BedrockAdapter(HttpClient httpClient, ICredentialStore credentialSt
                 }
             };
         }
-        else
+        else if (model.SupportsSamplingControl)
         {
             var temperature = helper.Creativity ?? model.DefaultCreativity;
             var topP = helper.Adherence ?? model.DefaultAdherence;
@@ -119,6 +119,8 @@ public class BedrockAdapter(HttpClient httpClient, ICredentialStore credentialSt
                 ["topP"] = topP
             };
         }
+        // else: model doesn't accept sampling params at all - send neither, let it use its
+        // own defaults. Don't infer this from SupportsReasoning; confirmed independent.
 
         return body;
     }

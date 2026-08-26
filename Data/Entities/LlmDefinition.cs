@@ -19,6 +19,13 @@ public class LlmDefinition
     public decimal DefaultAdherence { get; set; }
     /// <summary>Fallback Creativity (temperature) when a Helper doesn't specify its own.</summary>
     public decimal DefaultCreativity { get; set; }
+    /// <summary>
+    /// Whether this model accepts temperature/top_p at all. False for some newer models
+    /// regardless of reasoning support or whether Effort is engaged for a given call - confirmed
+    /// via a real Bedrock 400 ("temperature is deprecated for this model") on a model where
+    /// SupportsReasoning was already false, so this can't be inferred from that flag.
+    /// </summary>
+    public bool SupportsSamplingControl { get; set; } = true;
 
     public bool SupportsText { get; set; }
     public bool SupportsDocument { get; set; }

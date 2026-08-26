@@ -36,6 +36,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(p => p.Description).HasMaxLength(2048).IsRequired();
             e.Property(p => p.DefaultAdherence).HasPrecision(8, 5);
             e.Property(p => p.DefaultCreativity).HasPrecision(8, 5);
+            e.Property(p => p.SupportsSamplingControl).HasDefaultValue(true);
             e.Property(p => p.InputTokenCost).HasPrecision(8, 5);
             e.Property(p => p.OutputTokenCost).HasPrecision(8, 5);
             e.Property(p => p.Residency).HasConversion<string>().HasMaxLength(10);
