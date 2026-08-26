@@ -80,7 +80,7 @@ else
                             @if (_helper.LlmDefinition.SupportsText) { <span class="badge text-bg-light border">Text</span> }
                             @if (_helper.LlmDefinition.SupportsDocument) { <span class="badge text-bg-light border">Document</span> }
                             @if (_helper.LlmDefinition.SupportsImage) { <span class="badge text-bg-light border">Image</span> }
-                            @if (_helper.SupportsReasoning) { <span class="badge text-bg-light border">Reasoning</span> }
+                            @if (_helper.Effort is not null) { <span class="badge text-bg-light border">Reasoning: @_helper.Effort</span> }
                         </div>
                         <p class="text-muted small mb-0">Residency: @_helper.LlmDefinition.Residency</p>
                     }

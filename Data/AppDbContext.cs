@@ -27,11 +27,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
         modelBuilder.Entity<LlmDefinition>(e =>
         {
+            e.Property(p => p.Provider).HasConversion<string>().HasMaxLength(20);
             e.Property(p => p.Identifier).HasMaxLength(128).IsRequired();
             e.Property(p => p.Name).HasMaxLength(128).IsRequired();
             e.Property(p => p.Description).HasMaxLength(2048).IsRequired();
-            e.Property(p => p.DefaultTopP).HasPrecision(8, 5);
-            e.Property(p => p.DefaultTemperature).HasPrecision(8, 5);
+            e.Property(p => p.DefaultAdherence).HasPrecision(8, 5);
+            e.Property(p => p.DefaultCreativity).HasPrecision(8, 5);
             e.Property(p => p.InputTokenCost).HasPrecision(8, 5);
             e.Property(p => p.OutputTokenCost).HasPrecision(8, 5);
             e.Property(p => p.Residency).HasConversion<string>().HasMaxLength(10);
@@ -49,10 +50,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.Property(p => p.Name).HasMaxLength(128).IsRequired();
             e.Property(p => p.Description).HasMaxLength(2048);
-            e.Property(p => p.Temperature).HasPrecision(8, 5);
-            e.Property(p => p.TopP).HasPrecision(8, 5);
-            e.Property(p => p.TemperatureAdjustmentAllowance).HasPrecision(8, 5);
-            e.Property(p => p.TopPAdjustmentAllowance).HasPrecision(8, 5);
+            e.Property(p => p.Effort).HasConversion<string>().HasMaxLength(10);
+            e.Property(p => p.Creativity).HasPrecision(8, 5);
+            e.Property(p => p.Adherence).HasPrecision(8, 5);
+            e.Property(p => p.CreativityAdjustmentAllowance).HasPrecision(8, 5);
+            e.Property(p => p.AdherenceAdjustmentAllowance).HasPrecision(8, 5);
             e.Property(p => p.OwnerEmail).HasMaxLength(256);
             e.Property(p => p.Scope).HasConversion<string>().HasMaxLength(10);
             e.Property(p => p.ContextPrompt).HasMaxLength(2048);

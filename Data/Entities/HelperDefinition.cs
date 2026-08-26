@@ -17,13 +17,20 @@ public class HelperDefinition
     public int? LlmDefinitionId { get; set; }
     public LlmDefinition? LlmDefinition { get; set; }
 
-    public decimal? Temperature { get; set; }
-    public decimal? TopP { get; set; }
+    /// <summary>Generic reasoning-effort dial. Null means reasoning is off for this Helper; the
+    /// provider adapter ignores it entirely when LlmDefinition.SupportsReasoning is false.</summary>
+    public EffortLevel? Effort { get; set; }
 
-    /// <summary>How far the user is permitted to adjust temperature from the default, if at all.</summary>
-    public decimal? TemperatureAdjustmentAllowance { get; set; }
-    /// <summary>How far the user is permitted to adjust TopP from the default, if at all.</summary>
-    public decimal? TopPAdjustmentAllowance { get; set; }
+    /// <summary>Maps to temperature. Ignored by the adapter when reasoning is engaged for a model
+    /// where reasoning mode overrides sampling controls.</summary>
+    public decimal? Creativity { get; set; }
+    /// <summary>Maps to top_p. Same reasoning-mode override rule as Creativity.</summary>
+    public decimal? Adherence { get; set; }
+
+    /// <summary>How far the user is permitted to adjust Creativity from the default, if at all.</summary>
+    public decimal? CreativityAdjustmentAllowance { get; set; }
+    /// <summary>How far the user is permitted to adjust Adherence from the default, if at all.</summary>
+    public decimal? AdherenceAdjustmentAllowance { get; set; }
 
     public string? PrimaryPurpose { get; set; }
     public string? Methodology { get; set; }
@@ -44,9 +51,6 @@ public class HelperDefinition
 
     public bool AllowContext { get; set; }
     public string? ContextPrompt { get; set; }
-
-    public bool SupportsReasoning { get; set; }
-    public int? ReasoningTokens { get; set; }
 
     public bool HasKnowledge { get; set; }
     public string? KnowledgeData { get; set; }

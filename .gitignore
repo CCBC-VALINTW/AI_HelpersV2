@@ -9,6 +9,9 @@
 # Contains sensitive schema/integration info and example credentials - never commit
 /Project Info/
 
+# Reference material only (brand assets, style guides) - not app source
+/Design brief/
+
 # User-specific files
 *.rsuser
 *.suo

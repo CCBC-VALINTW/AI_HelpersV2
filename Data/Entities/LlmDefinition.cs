@@ -6,14 +6,19 @@ public class LlmDefinition
 {
     public int Id { get; set; }
 
-    /// <summary>Provider/model identifier, e.g. Bedrock model ID.</summary>
+    /// <summary>Which adapter calls this model - determines how Effort/Creativity/Adherence get translated.</summary>
+    public LlmProvider Provider { get; set; } = LlmProvider.AwsBedrock;
+
+    /// <summary>The provider's native model identifier, e.g. a Bedrock model ID.</summary>
     public required string Identifier { get; set; }
     public required string Name { get; set; }
     public required string Description { get; set; }
 
     public int? MaxTokens { get; set; }
-    public decimal DefaultTopP { get; set; }
-    public decimal DefaultTemperature { get; set; }
+    /// <summary>Fallback Adherence (top_p) when a Helper doesn't specify its own.</summary>
+    public decimal DefaultAdherence { get; set; }
+    /// <summary>Fallback Creativity (temperature) when a Helper doesn't specify its own.</summary>
+    public decimal DefaultCreativity { get; set; }
 
     public bool SupportsText { get; set; }
     public bool SupportsDocument { get; set; }
