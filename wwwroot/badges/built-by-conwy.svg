@@ -1,0 +1,93 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  xmlns:xlink="http://www.w3.org/1999/xlink"
+  width="720"
+  height="180"
+  viewBox="0 0 720 180"
+  role="img"
+  aria-labelledby="badgeTitle badgeDescription">
+
+  <title id="badgeTitle">Built by Conwy bilingual badge</title>
+  <desc id="badgeDescription">
+    A bilingual Built by and Wedi'i Greu gan badge,
+    with a tick on the left and the official Conwy logo on the right.
+  </desc>
+
+  <style>
+    .english {
+      font-family: "Arial", "Helvetica Neue", sans-serif;
+      font-size: 29px;
+      font-weight: 700;
+      letter-spacing: 1.4px;
+      fill: #17365d;
+    }
+
+    .welsh {
+      font-family: "Arial", "Helvetica Neue", sans-serif;
+      font-size: 21px;
+      font-weight: 600;
+      letter-spacing: 0.35px;
+      fill: #42484f;
+    }
+  </style>
+
+  <!-- White badge with rounded Conwy-blue border -->
+  <rect
+    x="3"
+    y="3"
+    width="714"
+    height="174"
+    rx="20"
+    fill="#ffffff"
+    stroke="#17365d"
+    stroke-width="6" />
+
+  <!-- Tick -->
+  <circle
+    cx="68"
+    cy="90"
+    r="34"
+    fill="#00843d" />
+
+  <path
+    d="M50 90 L63 103 L87 76"
+    fill="none"
+    stroke="#ffffff"
+    stroke-width="8"
+    stroke-linecap="round"
+    stroke-linejoin="round" />
+
+  <!-- Bilingual wording -->
+  <text
+    x="123"
+    y="81"
+    class="english">
+    BUILT BY
+  </text>
+
+  <text
+    x="123"
+    y="115"
+    class="welsh">
+    WEDI'I GREU GAN
+  </text>
+
+  <!-- Divider -->
+  <line
+    x1="365"
+    y1="42"
+    x2="365"
+    y2="138"
+    stroke="#d3d8dc"
+    stroke-width="2" />
+
+  <!-- Official Conwy logo (fetched from conwy.gov.uk, embedded so the badge is self-contained -
+       native resolution is only 90x58, so it's shown near-native size rather than stretched
+       to fill the slot, to avoid a blurry upscale) -->
+  <image
+    x="488"
+    y="55"
+    width="109"
+    height="70"
+    href="data:image/png;base64,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" />
+</svg>
