@@ -1,7 +1,9 @@
-/* Only visible briefly before TinyMCE initialises and hides the underlying textarea, replacing it
-   with its own UI (.tox-tinymce) that isn't part of this component's CSS-isolation scope - see the
-   identical rule/comment on HelperDetail.razor's .helper-output-editor. */
-.document-editor {
+/* Only visible briefly before structuredEditor.js initialises and replaces this empty div's
+   content with its own preview/edit-panel UI (.structured-editor-root, styled via a stylesheet
+   that JS module injects into <head> itself) - that generated markup isn't part of this
+   component's CSS-isolation scope, same reasoning as the TinyMCE editor this page used to host
+   (see HelperDetail.razor's .helper-output-editor for the identical pattern there). */
+.structured-editor-container {
     display: block;
     width: 100%;
 }

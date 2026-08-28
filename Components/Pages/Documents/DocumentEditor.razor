@@ -49,8 +49,9 @@ else
     </div>
 
     <p class="text-muted small">Exporting saves your latest changes first, then downloads the file.</p>
+    <p class="text-muted small">Click any piece of text in the preview to edit just that element - the rest of the document's layout is left alone.</p>
 
-    <textarea @ref="_editorRef" class="document-editor"></textarea>
+    <div @ref="_editorRef" class="structured-editor-container"></div>
 
     <div class="mt-4">
         <a href="/documents" class="btn btn-outline-secondary">Back to Documents</a>
@@ -60,9 +61,9 @@ else
 @code {
     [Parameter] public int Id { get; set; }
 
-    // Key TinyMCE's own editors Map (wwwroot/js/tinymceEditor.js) uses for this page's single
-    // editor instance - distinct from HelperDetail.razor's "input"/"output" ids, though that
-    // wouldn't matter anyway since each page is its own circuit/component instance.
+    // Key wwwroot/js/structuredEditor.js's own instances Map uses for this page's single editor
+    // instance - distinct from HelperDetail.razor's "input"/"output" ids, though that wouldn't
+    // matter anyway since each page is its own circuit/component instance.
     private const string EditorId = "document";
 
     private enum ExportFormat { Docx, Pdf, Html }
@@ -104,24 +105,11 @@ else
         {
             _editorNeedsInit = false;
             var module = await GetModuleAsync();
+            // Sanitized here (same as the TinyMCE editor this replaces) even though _document.HtmlContent
+            // was already sanitized on every prior save - this is what's fed into the preview iframe, so
+            // it's the same defense-in-depth point as before, just serving a different editing surface.
             await module.InvokeVoidAsync("createEditor", EditorId, _editorRef,
-                HtmlContentSanitizer.Sanitize(_document?.HtmlContent ?? ""),
-                "Start writing, or paste in content to polish...",
-                560,
-                new
-                {
-                    menubar = false,
-                    // A fuller toolbar/plugin set than HelperDetail.razor's own in-place editors -
-                    // this is the standalone "final polish" pass (tables, page breaks, alignment,
-                    // search/replace, fullscreen) rather than a quick tweak box. "image" is
-                    // deliberately left out for this first pass - embedding real image bytes into
-                    // the docx/pdf exports needs its own fetch/SSRF-guarded plumbing (the same
-                    // pattern IUrlFetchService already uses) that's out of scope here; leaving the
-                    // toolbar button in without export support would be a silently broken feature,
-                    // not a smaller one.
-                    plugins = "lists table link autolink advlist anchor charmap insertdatetime nonbreaking pagebreak preview quickbars searchreplace visualblocks visualchars wordcount fullscreen help",
-                    toolbar = "undo redo | blocks | bold italic underline strikethrough | forecolor backcolor | align lineheight | bullist numlist outdent indent | link table | pagebreak hr | removeformat | searchreplace | fullscreen preview | help",
-                });
+                HtmlContentSanitizer.Sanitize(_document?.HtmlContent ?? ""));
         }
     }
 
@@ -158,7 +146,7 @@ else
 
     /// <summary>Always saves first so the download always reflects what's currently in the editor,
     /// not whatever was last explicitly saved - the export endpoint (Program.cs) reads the
-    /// persisted record, it has no access to this circuit's live TinyMCE content.</summary>
+    /// persisted record, it has no access to this circuit's live preview/edit-panel state.</summary>
     private async Task ExportAsync(ExportFormat format)
     {
         await SaveAsync();
@@ -180,7 +168,7 @@ else
     }
 
     private async Task<IJSObjectReference> GetModuleAsync() =>
-        _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "/js/tinymceEditor.js");
+        _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "/js/structuredEditor.js");
 
     public async ValueTask DisposeAsync()
     {
