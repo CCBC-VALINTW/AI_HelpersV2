@@ -15,6 +15,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- AngleSharp is already pulled in transitively by HtmlSanitizer (it's Ganss.Xss's own HTML
+         parser) - pinned explicitly here too since DocumentExport now parses HTML with it
+         directly, matching the version HtmlSanitizer 9.2.995 already resolves (1.7.1) so there's
+         no risk of two conflicting versions being resolved. MIT licensed. -->
+    <PackageReference Include="AngleSharp" Version="1.7.1" />
+    <!-- Word (.docx) export - Microsoft's own Open XML SDK, MIT licensed, no licensing ambiguity. -->
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
     <PackageReference Include="HtmlSanitizer" Version="9.2.995" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" Version="10.0.11" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.11">
@@ -24,6 +31,10 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.11" />
     <PackageReference Include="Microsoft.Identity.Web" Version="4.14.2" />
     <PackageReference Include="Microsoft.Identity.Web.UI" Version="4.14.2" />
+    <!-- PDF export - PDFsharp/MigraDoc, MIT licensed, actively maintained (net10.0-targeted builds
+         as of 6.2.4), no revenue threshold or per-seat "community edition" terms unlike QuestPDF
+         (deliberately avoided - see the project's build report for the reasoning). -->
+    <PackageReference Include="PDFsharp-MigraDoc" Version="6.2.4" />
   </ItemGroup>
 
 </Project>

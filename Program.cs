@@ -121,6 +121,10 @@ builder.Services.AddScoped<IHelperInvocationService, HelperInvocationService>();
 // spend/cap figures never leak between users sharing the same server process.
 builder.Services.AddScoped<ISpendStatusService, SpendStatusService>();
 
+// Stateless (no per-request/per-circuit dependencies) - the docx/pdf renderers it wraps only take
+// plain strings in and bytes out - so a singleton is fine, same as any other pure converter.
+builder.Services.AddSingleton<IDocumentExportService, DocumentExportService>();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -146,4 +150,67 @@ app.MapRazorComponents<App>()
 // before its own sign-in logic ever runs - the one place anonymous access is actually correct.
 app.MapControllers().AllowAnonymous();
 
+// Binary file downloads (Word/PDF) for the document editor (Components/Pages/Documents/
+// DocumentEditor.razor) - a plain HTTP GET endpoint rather than a Blazor Server data: URI download
+// link (the pattern HelperDetail.razor uses for its own HTML-only "Download as HTML" button),
+// since a docx/pdf has to be actual binary bytes with the right Content-Type, not something that
+// fits neatly into a data: URI the way small HTML output does. No [AllowAnonymous]/explicit
+// [Authorize] needed - this endpoint has no authorization metadata of its own, so the global
+// FallbackPolicy above (RequireAuthenticatedUser) applies to it exactly the same as it does to
+// every Razor/MVC page. HttpContext.User - not ICurrentUserService - is used here deliberately:
+// ICurrentUserService reads AuthenticationStateProvider specifically because a Blazor Server
+// circuit outlives the original HTTP request, but this endpoint IS a plain, single HTTP request
+// (a real browser navigation, not SignalR/circuit traffic), so HttpContext.User already reflects
+// the signed-in user directly - see ICurrentUserService's own doc comment for that distinction.
+app.MapGet("/documents/{id:int}/export/{format}", async (
+    int id,
+    string format,
+    AppDbContext db,
+    IDocumentExportService exportService,
+    HttpContext http) =>
+{
+    var email = http.User.FindFirstValue(ClaimTypes.Email)
+        ?? http.User.FindFirstValue("preferred_username")
+        ?? http.User.FindFirstValue(ClaimTypes.Upn);
+
+    var document = await db.GeneratedDocuments.FirstOrDefaultAsync(d => d.Id == id);
+
+    // Same "not found" response whether the document doesn't exist or belongs to someone else -
+    // documents are private to whoever sent them to the editor (no sharing/admin-override in this
+    // first pass, see the project's build report), so this deliberately doesn't distinguish the
+    // two cases to a caller probing IDs.
+    if (document is null || email is null || !string.Equals(document.CreatedByEmail, email, StringComparison.OrdinalIgnoreCase))
+    {
+        return Results.NotFound();
+    }
+
+    var fileName = SanitizeFileName(document.Title);
+
+    return format switch
+    {
+        "docx" => Results.File(
+            exportService.ToDocx(document.Title, document.HtmlContent),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            $"{fileName}.docx"),
+        "pdf" => Results.File(
+            exportService.ToPdf(document.Title, document.HtmlContent),
+            "application/pdf",
+            $"{fileName}.pdf"),
+        "html" => Results.File(
+            exportService.ToHtml(document.Title, document.HtmlContent),
+            "text/html",
+            $"{fileName}.html"),
+        _ => Results.BadRequest("Unsupported export format - expected docx, pdf, or html."),
+    };
+});
+
 app.Run();
+
+// Mirrors HelperDetail.razor's own SanitizeFileName - kept as a local function here rather than a
+// shared helper since it's a one-line, well-contained rule with no other natural shared home.
+static string SanitizeFileName(string name)
+{
+    var invalid = Path.GetInvalidFileNameChars();
+    var cleaned = new string([.. name.Select(c => invalid.Contains(c) ? '-' : c)]);
+    return string.IsNullOrWhiteSpace(cleaned) ? "document" : cleaned;
+}
