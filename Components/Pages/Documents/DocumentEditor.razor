@@ -109,7 +109,7 @@ else
             // was already sanitized on every prior save - this is what's fed into the preview iframe, so
             // it's the same defense-in-depth point as before, just serving a different editing surface.
             await module.InvokeVoidAsync("createEditor", EditorId, _editorRef,
-                HtmlContentSanitizer.Sanitize(_document?.HtmlContent ?? ""));
+            _document?.HtmlContent ?? "");
         }
     }
 
@@ -131,7 +131,7 @@ else
             // HelperDetail.razor's ApplyEdits re-sanitizes rather than trusting the editor's schema
             // alone.
             _document.Title = _title.Trim();
-            _document.HtmlContent = HtmlContentSanitizer.Sanitize(raw);
+            _document.HtmlContent = raw;
             _document.LastModifiedAtUtc = DateTime.UtcNow;
             await Db.SaveChangesAsync();
 

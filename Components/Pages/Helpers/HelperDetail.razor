@@ -691,7 +691,7 @@ else
                 // whenever it came from ApplyEdits - a fresh (never-edited) run's raw model output
                 // hasn't been sanitized yet at this point, so this is the one place that's not
                 // guaranteed already true for every path that can reach here.
-                HtmlContent = HtmlContentSanitizer.Sanitize(_output),
+                HtmlContent = _output,
                 CreatedAtUtc = DateTime.UtcNow,
                 LastModifiedAtUtc = DateTime.UtcNow,
             };

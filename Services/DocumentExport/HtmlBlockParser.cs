@@ -101,6 +101,14 @@ internal static partial class HtmlBlockParser
             case "br":
                 return; // handled inline within ExtractRuns, not reached as a direct block child in practice
 
+            case "style" or "script" or "head" or "title" or "meta" or "link":
+                // Never exportable content - without this, the default branch below extracts a
+                // <style>/<script> element's raw text (CSS/JS source) as if it were a plain
+                // paragraph, since neither has element children for HasBlockDescendant to find.
+                // head/title/meta/link are defensive - bodyHtml is a fragment in practice, but
+                // costs nothing to exclude them too if one ever shows up.
+                return;
+
             default:
                 // Inline-only or unknown wrapper sitting at block position (a bare span/a/strong,
                 // or an unrecognised tag) - recurse if it has block children, otherwise treat its

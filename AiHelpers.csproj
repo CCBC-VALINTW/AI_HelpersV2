@@ -12,6 +12,16 @@
     <Compile Remove="Tools\**" />
     <Content Remove="Tools\**" />
     <None Remove="Tools\**" />
+    <!-- Gitignored reference material for Claude (V1 schema exports, integration definitions,
+         corporate style guide) - .gitignore keeps these out of source control but means nothing
+         to MSBuild's own default content globbing, which picks up arbitrary project-root folders
+         as publishable Content unless explicitly excluded here. Confirmed missing this exclusion
+         let "Project Info" ship straight into a real publish output during the first deployment -
+         that folder has held a live credential before (see docs/DEPLOYMENT.md), so this isn't
+         just tidiness. -->
+    <Compile Remove="Project Info\**;Design brief\**" />
+    <Content Remove="Project Info\**;Design brief\**" />
+    <None Remove="Project Info\**;Design brief\**" />
   </ItemGroup>
 
   <ItemGroup>
