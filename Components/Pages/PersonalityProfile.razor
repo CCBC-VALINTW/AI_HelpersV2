@@ -1,0 +1,587 @@
+@page "/personality"
+@rendermode InteractiveServer
+@using AiHelpers.Contracts
+@using AiHelpers.Data
+@using AiHelpers.Data.Entities
+@using AiHelpers.Services
+@using Microsoft.EntityFrameworkCore
+@using System.Text.Json
+@inject AppDbContext Db
+@inject ICurrentUserService CurrentUser
+
+<PageTitle>My Personality Profiles</PageTitle>
+
+<h1>My Personality Profiles</h1>
+<p class="text-muted">
+    Build one or more communication style profiles for AI Helpers - e.g. one for formal reports,
+    one for casual emails - and pick whichever fits the job when you run a Helper.
+</p>
+
+@if (_loading)
+{
+    <p><em>Loading…</em></p>
+}
+else
+{
+    <div class="card mb-4">
+        <div class="card-header">Your personalities</div>
+        <div class="card-body p-0">
+            @if (_personalities.Count == 0)
+            {
+                <p class="text-muted p-3 mb-0">You haven't created any personalities yet - fill in the form below to create your first one.</p>
+            }
+            else
+            {
+                <table class="table mb-0 align-middle">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Default</th>
+                            <th>Preview</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var p in _personalities)
+                        {
+                            <tr>
+                                <td>@p.Name</td>
+                                <td>@(p.IsDefault ? "★" : "")</td>
+                                <td class="text-muted small">@Preview(p.Prompt)</td>
+                                <td class="text-end">
+                                    <div class="d-flex gap-2 justify-content-end">
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => EditPersonality(p)">Edit</button>
+                                        @if (!p.IsDefault)
+                                        {
+                                            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => SetDefaultAsync(p.Id)">Set default</button>
+                                        }
+                                        @if (_confirmDeleteId == p.Id)
+                                        {
+                                            <button type="button" class="btn btn-danger btn-sm" @onclick="() => DeleteAsync(p.Id)">Confirm delete</button>
+                                            <button type="button" class="btn btn-link btn-sm" @onclick="() => _confirmDeleteId = null">Cancel</button>
+                                        }
+                                        else
+                                        {
+                                            <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => _confirmDeleteId = p.Id">Delete</button>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <h2 class="h5 mb-0">@(_editingId is null ? "New personality" : $"Editing: {_originalName}")</h2>
+        @if (_editingId is not null)
+        {
+            <button type="button" class="btn btn-link btn-sm" @onclick="StartNew">Start a new personality instead</button>
+        }
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-body">
+            <label class="form-label fw-semibold mb-1" for="personalityName">Name</label>
+            <p class="text-muted small mb-2">A short label to tell this personality apart from your others, e.g. "Formal reports" or "Casual emails".</p>
+            <input id="personalityName" class="form-control mb-3" style="max-width: 24rem;" maxlength="128"
+                   value="@_name" @oninput="e => _name = e.Value?.ToString() ?? string.Empty" />
+
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="setDefault" checked="@_setAsDefault" @onchange="e => _setAsDefault = (bool)e.Value!" />
+                <label class="form-check-label" for="setDefault">Make this my default personality (pre-selected when running a Helper)</label>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header">Tone &amp; Personality</div>
+        <div class="card-body d-flex flex-column gap-4">
+            <div>
+                <label class="form-label fw-semibold mb-1">Overall tone preference</label>
+                <p class="text-muted small mb-2">Choose the tone that best reflects how you want the LLM to communicate with you.</p>
+                @foreach (var option in ToneOptions)
+                {
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="tonePreference" id="@("tone-" + option.Value)"
+                               checked="@(_answers.TonePreference == option.Value)"
+                               @onchange="() => { _answers.TonePreference = option.Value; OnAnswerChanged(); }" />
+                        <label class="form-check-label" for="@("tone-" + option.Value)">@option.Label</label>
+                    </div>
+                }
+            </div>
+
+            <RangeSlider Label="Formality level" Help="1 = Very informal and relaxed. 5 = Highly formal and structured."
+                         MinLabel="Very Informal" MaxLabel="Highly Formal" Labels="FormalityLabels"
+                         Value="_answers.FormalityLevel" ValueChanged="v => { _answers.FormalityLevel = v; OnAnswerChanged(); }" />
+
+            <RangeSlider Label="Analytical vs Creative" Help="1 = Heavily data-driven, logical, structured. 5 = Highly imaginative, intuitive, lateral."
+                         MinLabel="Purely Analytical" MaxLabel="Purely Creative" Labels="CreativityLabels"
+                         Value="_answers.AnalyticalCreative" ValueChanged="v => { _answers.AnalyticalCreative = v; OnAnswerChanged(); }" />
+
+            <RangeSlider Label="Serious vs Playful" Help="1 = Always serious, earnest, no-nonsense. 5 = Playful, light-hearted, witty."
+                         MinLabel="Always Serious" MaxLabel="Playful &amp; Witty" Labels="SeriousnessLabels"
+                         Value="_answers.SeriousPlayful" ValueChanged="v => { _answers.SeriousPlayful = v; OnAnswerChanged(); }" />
+
+            <RangeSlider Label="Concise vs Elaborate" Help="1 = Short, punchy, to the point — no padding. 5 = Rich, expansive, thoroughly explored."
+                         MinLabel="Very Concise" MaxLabel="Richly Elaborate" Labels="ProsaicLabels"
+                         Value="_answers.ConciseElaborate" ValueChanged="v => { _answers.ConciseElaborate = v; OnAnswerChanged(); }" />
+
+            <RangeSlider Label="Conventional vs Unconventional" Help="1 = Follow established norms and conventions closely. 5 = Challenge assumptions, subvert expectations, think sideways."
+                         MinLabel="Conventional" MaxLabel="Unconventional" Labels="ConventionalityLabels"
+                         Value="_answers.ConventionalUnconventional" ValueChanged="v => { _answers.ConventionalUnconventional = v; OnAnswerChanged(); }" />
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header">Language &amp; Vocabulary</div>
+        <div class="card-body d-flex flex-column gap-4">
+            <RadioGroup Label="Vocabulary style" Help="How would you describe the vocabulary style you prefer?"
+                        Options="VocabularyOptions" GroupKey="vocab" SelectedValue="_answers.VocabularyStyle"
+                        SelectedValueChanged="v => { _answers.VocabularyStyle = v; OnAnswerChanged(); }" />
+
+            <RadioGroup Label="Use of humour" Help="How much humour would you like the LLM to weave into its responses?"
+                        Options="HumourOptions" GroupKey="humour" SelectedValue="_answers.HumourUse"
+                        SelectedValueChanged="v => { _answers.HumourUse = v; OnAnswerChanged(); }" />
+
+            <RadioGroup Label="Use of metaphors, analogies &amp; idioms" Help="Should the LLM draw on figurative language to explain or enrich its responses?"
+                        Options="MetaphorOptions" GroupKey="metaphor" SelectedValue="_answers.MetaphorUse"
+                        SelectedValueChanged="v => { _answers.MetaphorUse = v; OnAnswerChanged(); }" />
+
+            <RadioGroup Label="Sentence structure preference" Help="How should the LLM construct its sentences?"
+                        Options="SentenceStructureOptions" GroupKey="sentence" SelectedValue="_answers.SentenceStructure"
+                        SelectedValueChanged="v => { _answers.SentenceStructure = v; OnAnswerChanged(); }" />
+
+            <RadioGroup Label="Contractions" Help="Should the LLM use contractions such as 'it's', 'don't', 'we're'?"
+                        Options="ContractionOptions" GroupKey="contraction" SelectedValue="_answers.ContractionPreference"
+                        SelectedValueChanged="v => { _answers.ContractionPreference = v; OnAnswerChanged(); }" />
+
+            <RadioGroup Label="Response structure" Help="How do you prefer information to be presented?"
+                        Options="ResponseStructureOptions" GroupKey="response" SelectedValue="_answers.ResponseStructure"
+                        SelectedValueChanged="v => { _answers.ResponseStructure = v; OnAnswerChanged(); }" />
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header">Things to Avoid</div>
+        <div class="card-body d-flex flex-column gap-3">
+            <div>
+                <p class="text-muted small mb-2">Tick everything that should be ruled out. These become hard rules in your profile.</p>
+                @foreach (var option in AvoidOptions)
+                {
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="@("avoid-" + option.Value)"
+                               checked="@_answers.AvoidCommon.Contains(option.Value)"
+                               @onchange="e => ToggleSet(_answers.AvoidCommon, option.Value, (bool)e.Value!)" />
+                        <label class="form-check-label" for="@("avoid-" + option.Value)">@option.Label</label>
+                    </div>
+                }
+            </div>
+            <div>
+                <label class="form-label small mb-1" for="avoidCustom">Your own avoidances</label>
+                <textarea id="avoidCustom" class="form-control" rows="2" maxlength="2000"
+                          placeholder="Add anything specific not covered above."
+                          value="@_answers.AvoidCustom" @oninput="e => { _answers.AvoidCustom = e.Value?.ToString() ?? string.Empty; OnAnswerChanged(); }"></textarea>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header">Things to Encourage</div>
+        <div class="card-body d-flex flex-column gap-3">
+            <div>
+                <p class="text-muted small mb-2">Tick everything you'd like the LLM to actively do. These become positive instructions in your profile.</p>
+                @foreach (var option in EncourageOptions)
+                {
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="@("encourage-" + option.Value)"
+                               checked="@_answers.EncourageCommon.Contains(option.Value)"
+                               @onchange="e => ToggleSet(_answers.EncourageCommon, option.Value, (bool)e.Value!)" />
+                        <label class="form-check-label" for="@("encourage-" + option.Value)">@option.Label</label>
+                    </div>
+                }
+            </div>
+            <div>
+                <label class="form-label small mb-1" for="encourageCustom">Your own encouragements</label>
+                <textarea id="encourageCustom" class="form-control" rows="2" maxlength="2000"
+                          placeholder="Add any specific positive instructions not covered above."
+                          value="@_answers.EncourageCustom" @oninput="e => { _answers.EncourageCustom = e.Value?.ToString() ?? string.Empty; OnAnswerChanged(); }"></textarea>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header">Generated Profile</div>
+        <div class="card-body d-flex flex-column gap-2">
+            <p class="text-muted small mb-1">
+                Assembled from your answers above. Review it, tweak it if you like, then save - further
+                changes to the answers above won't overwrite your edits once you've changed this box yourself.
+            </p>
+            <textarea class="form-control font-monospace small" rows="6" maxlength="4000"
+                      value="@_finalProfileText" @oninput="e => { _finalProfileText = e.Value?.ToString() ?? string.Empty; _manuallyEdited = true; }"></textarea>
+            <div class="d-flex align-items-center gap-2 mt-1">
+                <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="RegenerateFromAnswers">Regenerate from my answers</button>
+                <button type="button" class="btn btn-primary btn-sm" @onclick="SaveAsync" disabled="@(!CanSave || _saving)">
+                    @(_saving ? "Saving…" : _editingId is null ? "Save as new personality" : "Save changes")
+                </button>
+                @if (!CanSave)
+                {
+                    <span class="text-muted small">Name it, choose a tone preference, and answer all Language &amp; Vocabulary questions to save.</span>
+                }
+            </div>
+            @if (_saveError is not null)
+            {
+                <div class="alert alert-danger py-2 small mb-0 mt-2">@_saveError</div>
+            }
+            @if (_savedMessage is not null)
+            {
+                <div class="alert alert-success py-2 small mb-0 mt-2">@_savedMessage</div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly (string Value, string Label)[] ToneOptions =
+    [
+        ("formal and professional", "Formal & Professional"),
+        ("semi-formal and balanced", "Semi-Formal & Balanced"),
+        ("conversational and friendly", "Conversational & Friendly"),
+        ("casual and relaxed", "Casual & Relaxed"),
+        ("academic and rigorous", "Academic & Rigorous"),
+        ("creative and expressive", "Creative & Expressive"),
+    ];
+
+    private static readonly (string Value, string Label)[] VocabularyOptions =
+    [
+        ("plain and accessible", "Plain & Accessible — clear, everyday words everyone understands"),
+        ("precise and technical", "Precise & Technical — exact terminology, domain-specific language"),
+        ("rich and varied", "Rich & Varied — a broad, well-chosen vocabulary with textured language"),
+        ("academic and scholarly", "Academic & Scholarly — formal register, referenced language"),
+        ("imaginative and florid", "Imaginative & Florid — vivid, colourful, unconventional word choices"),
+    ];
+
+    private static readonly (string Value, string Label)[] HumourOptions =
+    [
+        ("none", "None — keep it strictly professional"),
+        ("rare", "Rare — only where clearly appropriate"),
+        ("occasional", "Occasional — a light touch when the moment calls for it"),
+        ("regular", "Regular — wit and levity are welcome throughout"),
+        ("frequent", "Frequent — humour is a core part of my communication style"),
+    ];
+
+    private static readonly (string Value, string Label)[] MetaphorOptions =
+    [
+        ("never", "Never — stick to literal, direct language"),
+        ("sparingly", "Sparingly — only when genuinely clarifying"),
+        ("moderately", "Moderately — a good analogy where it helps"),
+        ("freely", "Freely — figurative language enriches the text"),
+    ];
+
+    private static readonly (string Value, string Label)[] SentenceStructureOptions =
+    [
+        ("short and punchy", "Short & punchy — simple, direct, high impact"),
+        ("varied", "Varied — mix of short and longer sentences for rhythm"),
+        ("long and complex", "Long & complex — layered sentences with subordinate clauses"),
+        ("flowing prose", "Flowing prose — continuous, uninterrupted narrative style"),
+    ];
+
+    private static readonly (string Value, string Label)[] ContractionOptions =
+    [
+        ("use contractions freely", "Yes — contractions make language feel natural and warm"),
+        ("use contractions occasionally", "Sometimes — where it feels natural but not always"),
+        ("avoid contractions", "No — always write out words in full for clarity and formality"),
+    ];
+
+    private static readonly (string Value, string Label)[] ResponseStructureOptions =
+    [
+        ("flowing prose with minimal lists", "Prose — flowing paragraphs, minimal lists"),
+        ("structured with headings and bullet points", "Structured — headings, bullet points, and clear sections"),
+        ("mixed prose and structured lists", "Mixed — prose for explanation, lists for key points"),
+        ("adaptive to the task", "Adaptive — structure should match the nature of the task"),
+    ];
+
+    private static readonly (string Value, string Label)[] AvoidOptions =
+    [
+        ("corporate jargon and buzzwords", "Corporate jargon and buzzwords (e.g. 'synergy', 'leverage', 'pivot')"),
+        ("sycophantic openers", "Sycophantic openers (e.g. 'Great question!', 'Absolutely!', 'Certainly!')"),
+        ("filler phrases that add no meaning", "Filler phrases that add no meaning"),
+        ("excessive exclamation marks", "Excessive use of exclamation marks"),
+        ("passive voice", "Passive voice constructions"),
+        ("over-qualification and unnecessary hedging", "Over-qualification and unnecessary hedging"),
+        ("starting every response with 'I'", "Starting every response with 'I'"),
+        ("numbered lists for everything", "Numbered lists for absolutely everything"),
+        ("repetition of the user's own words", "Repetition of the user's own words back at them"),
+        ("overly cautious disclaimers", "Overly cautious disclaimers and warnings"),
+        ("clichés and tired expressions", "Clichés and tired expressions"),
+        ("American English spellings", "American English spellings (e.g. 'color', 'organize')"),
+        ("padding to increase length artificially", "Padding to increase response length artificially"),
+        ("explaining what you are about to do instead of doing it", "Explaining what you are about to do instead of just doing it"),
+    ];
+
+    private static readonly (string Value, string Label)[] EncourageOptions =
+    [
+        ("select words with precision and care", "Select words with precision and care"),
+        ("use imaginative, unconventional, and florid language", "Use imaginative, unconventional, and florid language"),
+        ("lead with the answer then provide supporting detail", "Lead with the answer, then provide supporting detail"),
+        ("use concrete specific examples", "Use concrete, specific examples rather than abstract statements"),
+        ("challenge assumptions and offer alternative perspectives", "Challenge assumptions and offer alternative perspectives"),
+        ("employ active voice throughout", "Employ active voice throughout"),
+        ("use wit, wordplay, and deft turns of phrase where appropriate", "Use wit, wordplay, and deft turns of phrase where appropriate"),
+        ("draw on literary, cultural, or historical references where relevant", "Draw on literary, cultural, or historical references where relevant"),
+        ("be direct and confident", "Be direct and confident — avoid dithering"),
+        ("acknowledge uncertainty honestly", "Acknowledge uncertainty honestly rather than bluffing"),
+        ("mirror the register and energy of the user's message", "Mirror the register and energy of the user's message"),
+        ("use British English spelling and idiom throughout", "Use British English spelling and idiom throughout"),
+        ("vary sentence rhythm to maintain engagement", "Vary sentence rhythm to maintain reader engagement"),
+        ("think critically and push back where appropriate", "Think critically — push back where appropriate"),
+        ("be concise and cut anything that does not earn its place", "Be concise: cut anything that doesn't earn its place"),
+    ];
+
+    private static readonly Dictionary<int, string> FormalityLabels = new()
+    {
+        [1] = "very informal", [2] = "informal", [3] = "balanced", [4] = "formal", [5] = "highly formal",
+    };
+
+    private static readonly Dictionary<int, string> CreativityLabels = new()
+    {
+        [1] = "purely analytical", [2] = "mostly analytical", [3] = "balanced", [4] = "mostly creative", [5] = "highly creative",
+    };
+
+    private static readonly Dictionary<int, string> SeriousnessLabels = new()
+    {
+        [1] = "very serious", [2] = "mostly serious", [3] = "neutral", [4] = "light", [5] = "playful & witty",
+    };
+
+    private static readonly Dictionary<int, string> ProsaicLabels = new()
+    {
+        [1] = "very concise", [2] = "concise", [3] = "balanced", [4] = "detailed", [5] = "richly elaborate",
+    };
+
+    private static readonly Dictionary<int, string> ConventionalityLabels = new()
+    {
+        [1] = "very conventional", [2] = "mostly conventional", [3] = "balanced", [4] = "somewhat unconventional", [5] = "highly unconventional",
+    };
+
+    private bool _loading = true;
+    private bool _saving;
+    private string _email = "";
+    private List<PersonalityPrompt> _personalities = [];
+    private int? _editingId;
+    private string _originalName = "";
+    private string _name = "";
+    private bool _setAsDefault;
+    private PersonalityAnswers _answers = new();
+    private string _finalProfileText = "";
+    private bool _manuallyEdited;
+    private string? _savedMessage;
+    private string? _saveError;
+    private int? _confirmDeleteId;
+
+    private bool CanSave =>
+        !string.IsNullOrWhiteSpace(_name) &&
+        !string.IsNullOrWhiteSpace(_answers.TonePreference) &&
+        !string.IsNullOrWhiteSpace(_answers.VocabularyStyle) &&
+        !string.IsNullOrWhiteSpace(_answers.HumourUse) &&
+        !string.IsNullOrWhiteSpace(_answers.MetaphorUse) &&
+        !string.IsNullOrWhiteSpace(_answers.SentenceStructure) &&
+        !string.IsNullOrWhiteSpace(_answers.ContractionPreference) &&
+        !string.IsNullOrWhiteSpace(_answers.ResponseStructure) &&
+        !string.IsNullOrWhiteSpace(_finalProfileText);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _email = await CurrentUser.GetEmailAsync();
+        await LoadListAsync();
+        StartNew();
+        _loading = false;
+    }
+
+    private async Task LoadListAsync()
+    {
+        _personalities = await Db.PersonalityPrompts
+            .Where(p => p.Email == _email)
+            .OrderByDescending(p => p.IsDefault)
+            .ThenBy(p => p.Name)
+            .ToListAsync();
+    }
+
+    private void StartNew()
+    {
+        _editingId = null;
+        _originalName = "";
+        _name = "";
+        _setAsDefault = _personalities.Count == 0;
+        _answers = new();
+        _finalProfileText = ComposeProfile();
+        _manuallyEdited = false;
+        _saveError = null;
+        _savedMessage = null;
+    }
+
+    private void EditPersonality(PersonalityPrompt p)
+    {
+        _editingId = p.Id;
+        _originalName = p.Name;
+        _name = p.Name;
+        _setAsDefault = p.IsDefault;
+        _answers = !string.IsNullOrWhiteSpace(p.AnswersJson)
+            ? JsonSerializer.Deserialize<PersonalityAnswers>(p.AnswersJson) ?? new()
+            : new();
+        _finalProfileText = p.Prompt;
+        // A saved personality might have been hand-edited beyond what the answers alone produce -
+        // don't silently overwrite it just because it's been loaded for editing. Regeneration only
+        // resumes once "Regenerate from my answers" is clicked explicitly.
+        _manuallyEdited = true;
+        _saveError = null;
+        _savedMessage = null;
+    }
+
+    private void OnAnswerChanged()
+    {
+        if (!_manuallyEdited)
+        {
+            _finalProfileText = ComposeProfile();
+        }
+    }
+
+    private void RegenerateFromAnswers()
+    {
+        _finalProfileText = ComposeProfile();
+        _manuallyEdited = false;
+    }
+
+    private static void ToggleSet(HashSet<string> set, string value, bool isChecked)
+    {
+        if (isChecked) set.Add(value); else set.Remove(value);
+    }
+
+    private static string Preview(string prompt) => prompt.Length <= 90 ? prompt : prompt[..90].TrimEnd() + "…";
+
+    private async Task SaveAsync()
+    {
+        if (!CanSave) return;
+
+        var trimmedName = _name.Trim();
+        if (_personalities.Any(p => p.Id != _editingId && p.Name.Equals(trimmedName, StringComparison.OrdinalIgnoreCase)))
+        {
+            _saveError = $"You already have a personality named \"{trimmedName}\".";
+            return;
+        }
+
+        _saving = true;
+        _saveError = null;
+        var answersJson = JsonSerializer.Serialize(_answers);
+
+        if (_setAsDefault)
+        {
+            await ClearOtherDefaultsAsync(_editingId);
+        }
+
+        if (_editingId is null)
+        {
+            Db.PersonalityPrompts.Add(new PersonalityPrompt
+            {
+                Email = _email,
+                Name = trimmedName,
+                Prompt = _finalProfileText,
+                AnswersJson = answersJson,
+                IsDefault = _setAsDefault,
+            });
+        }
+        else
+        {
+            var existing = await Db.PersonalityPrompts.FirstOrDefaultAsync(p => p.Id == _editingId && p.Email == _email);
+            if (existing is not null)
+            {
+                existing.Name = trimmedName;
+                existing.Prompt = _finalProfileText;
+                existing.AnswersJson = answersJson;
+                existing.IsDefault = _setAsDefault;
+            }
+        }
+        await Db.SaveChangesAsync();
+
+        await LoadListAsync();
+        _manuallyEdited = true;
+        _originalName = trimmedName;
+        _savedMessage = "Saved. This personality is now available to pick when you run any Helper.";
+        _saving = false;
+    }
+
+    private async Task SetDefaultAsync(int id)
+    {
+        await ClearOtherDefaultsAsync(id);
+        var target = await Db.PersonalityPrompts.FirstOrDefaultAsync(p => p.Id == id && p.Email == _email);
+        if (target is not null)
+        {
+            target.IsDefault = true;
+            await Db.SaveChangesAsync();
+        }
+        await LoadListAsync();
+    }
+
+    private async Task ClearOtherDefaultsAsync(int? exceptId)
+    {
+        var others = await Db.PersonalityPrompts
+            .Where(p => p.Email == _email && p.IsDefault && p.Id != exceptId)
+            .ToListAsync();
+        foreach (var o in others) o.IsDefault = false;
+        if (others.Count > 0) await Db.SaveChangesAsync();
+    }
+
+    private async Task DeleteAsync(int id)
+    {
+        var target = await Db.PersonalityPrompts.FirstOrDefaultAsync(p => p.Id == id && p.Email == _email);
+        if (target is not null)
+        {
+            Db.PersonalityPrompts.Remove(target);
+            await Db.SaveChangesAsync();
+        }
+        _confirmDeleteId = null;
+        await LoadListAsync();
+        if (_editingId == id) StartNew();
+    }
+
+    /// <summary>
+    /// Ports V1's exact GovService formula (concat/if chain building "Tone:... | Lang:... |
+    /// Avoid:... | Encourage:...") into plain C#. One deliberate tidy-up over V1: V1's formula
+    /// always appended a ", {avoidCustom}"/", {encourageCustom}" suffix even when that box was
+    /// blank, leaving a dangling ", " in the generated text - here the common-list and
+    /// custom-text parts are only joined when both/either are actually present.
+    /// </summary>
+    private string ComposeProfile()
+    {
+        var a = _answers;
+
+        var tone = $"Tone:{a.TonePreference} | Formality level :{FormalityLabels[a.FormalityLevel]}" +
+                   $" | Creativity Level :{CreativityLabels[a.AnalyticalCreative]}" +
+                   $" | Seriousness / Levity Level :{SeriousnessLabels[a.SeriousPlayful]}" +
+                   $" | Prosaic style :{ProsaicLabels[a.ConciseElaborate]}" +
+                   $" | Conventionality Level :{ConventionalityLabels[a.ConventionalUnconventional]}";
+
+        var lang = "Lang:" +
+                   $"Vocabulary Style : {a.VocabularyStyle}, Use of Humour : {a.HumourUse}" +
+                   $", Inclusion of Metaphors, Analogies and Idioms : {a.MetaphorUse}" +
+                   $", Sentence Structure : {a.SentenceStructure}, Use of Contractions : {a.ContractionPreference}" +
+                   $", Response Structure : {a.ResponseStructure}";
+
+        var parts = new List<string> { tone, lang };
+
+        var avoidParts = new List<string>();
+        var avoidSelected = AvoidOptions.Where(o => a.AvoidCommon.Contains(o.Value)).Select(o => o.Value).ToList();
+        if (avoidSelected.Count > 0) avoidParts.Add(string.Join(", ", avoidSelected));
+        if (!string.IsNullOrWhiteSpace(a.AvoidCustom)) avoidParts.Add(a.AvoidCustom.Trim());
+        if (avoidParts.Count > 0) parts.Add("Avoid : " + string.Join(", ", avoidParts));
+
+        var encourageParts = new List<string>();
+        var encourageSelected = EncourageOptions.Where(o => a.EncourageCommon.Contains(o.Value)).Select(o => o.Value).ToList();
+        if (encourageSelected.Count > 0) encourageParts.Add(string.Join(", ", encourageSelected));
+        if (!string.IsNullOrWhiteSpace(a.EncourageCustom)) encourageParts.Add(a.EncourageCustom.Trim());
+        if (encourageParts.Count > 0) parts.Add("Encourage : " + string.Join(", ", encourageParts));
+
+        return string.Join("\n", parts);
+    }
+}

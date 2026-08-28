@@ -1,0 +1,12 @@
+{
+  "name": "aihelpers-client",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Vendors the self-hosted (GPL, no cloud API key) TinyMCE distribution used by HelperDetail.razor into wwwroot/lib/tinymce - not served from tiny.cloud, so nothing here executes with a live network dependency.",
+  "scripts": {
+    "build": "node copy-tinymce.mjs"
+  },
+  "dependencies": {
+    "tinymce": "^8.8.2"
+  }
+}

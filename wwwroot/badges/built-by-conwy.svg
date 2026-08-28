@@ -1,9 +1,9 @@
 <svg
   xmlns="http://www.w3.org/2000/svg"
   xmlns:xlink="http://www.w3.org/1999/xlink"
-  width="720"
+  width="670"
   height="180"
-  viewBox="0 0 720 180"
+  viewBox="0 0 670 180"
   role="img"
   aria-labelledby="badgeTitle badgeDescription">
 
@@ -35,7 +35,7 @@
   <rect
     x="3"
     y="3"
-    width="714"
+    width="664"
     height="174"
     rx="20"
     fill="#ffffff"
@@ -74,9 +74,9 @@
 
   <!-- Divider -->
   <line
-    x1="420"
+    x1="370"
     y1="28"
-    x2="420"
+    x2="370"
     y2="152"
     stroke="#d3d8dc"
     stroke-width="2" />
@@ -85,7 +85,7 @@
        instead of the small 90x58 header logo, with its near-white background keyed to
        transparent so it composites cleanly onto the badge. -->
   <image
-    x="486"
+    x="436"
     y="30"
     width="182"
     height="120"

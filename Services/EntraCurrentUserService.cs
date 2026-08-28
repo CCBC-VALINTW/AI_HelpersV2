@@ -27,6 +27,8 @@ public class EntraCurrentUserService(AuthenticationStateProvider authStateProvid
         return adminEmails.Contains(email, StringComparer.OrdinalIgnoreCase);
     }
 
+    public Task<ClaimsPrincipal> GetPrincipalAsync() => GetUserAsync();
+
     private async Task<ClaimsPrincipal> GetUserAsync()
     {
         var state = await authStateProvider.GetAuthenticationStateAsync();

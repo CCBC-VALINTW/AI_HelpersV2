@@ -4,7 +4,6 @@ using AiHelpers.Data;
 using AiHelpers.Data.Entities;
 using AiHelpers.Data.Enums;
 using AiHelpers.Providers;
-using Microsoft.EntityFrameworkCore;
 
 namespace AiHelpers.Services;
 
@@ -13,9 +12,9 @@ namespace AiHelpers.Services;
 /// against the app's own database, instead of SQL-mediated async polling - see
 /// project_ai_helpers_v1_architecture memory for the original flow this replaces.
 /// </summary>
-public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAdapter> adapters) : IHelperInvocationService
+public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAdapter> adapters, ISpendStatusService spendStatus) : IHelperInvocationService
 {
-    public async Task<HelperInvocationOutcome> RunAsync(HelperDefinition helper, string userInput, string userEmail, CancellationToken cancellationToken = default)
+    public async Task<HelperInvocationOutcome> RunAsync(HelperDefinition helper, string userInput, string userEmail, IReadOnlyList<Attachment>? attachments = null, CancellationToken cancellationToken = default)
     {
         if (helper.IsExternal)
         {
@@ -27,7 +26,7 @@ public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAd
             return new HelperInvocationOutcome { ErrorMessage = "This Helper has no model configured." };
         }
 
-        var (spend, cap) = await GetSpendAndCapAsync(userEmail, cancellationToken);
+        var (spend, cap) = await spendStatus.RefreshAsync(userEmail, cancellationToken);
         if (spend >= cap)
         {
             return new HelperInvocationOutcome { BudgetExceeded = true, Spend = spend, Cap = cap };
@@ -46,7 +45,8 @@ public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAd
             {
                 Helper = helper,
                 Model = helper.LlmDefinition,
-                UserInput = userInput
+                UserInput = userInput,
+                Attachments = BuildAttachments(helper, attachments)
             }, cancellationToken);
         }
         catch (Exception ex)
@@ -70,13 +70,51 @@ public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAd
         });
         await db.SaveChangesAsync(cancellationToken);
 
+        // Recompute rather than reuse the pre-call (spend, cap) - this run's own cost has just
+        // been logged, so the pre-call figures would under-report by exactly this call's cost.
+        // Also pushes the update out via SpendStatusService.Changed so the top status bar reflects
+        // it immediately, not just whatever this method returns to its caller.
+        var (updatedSpend, updatedCap) = await spendStatus.RefreshAsync(userEmail, cancellationToken);
+
         var response = new HelperResponse
         {
             SuggestedFileName = helper.Name,
             Documents = [new Document { Type = DocumentType.Html, Name = helper.Name, Content = ExtractContent(result.Text) }]
         };
 
-        return new HelperInvocationOutcome { Response = response, Spend = spend, Cap = cap };
+        return new HelperInvocationOutcome { Response = response, Spend = updatedSpend, Cap = updatedCap };
+    }
+
+    /// <summary>
+    /// V1 sent a Helper's configured Knowledge document (a reference/template file, e.g. the
+    /// exact report template a "Committee Report Generator"-style Helper must adhere to) as a
+    /// real Converse API document content block - V2 had this in the schema
+    /// (HasKnowledge/KnowledgeData/KnowledgeFileType) but never actually sent it. Prepended ahead
+    /// of any user-uploaded attachments, matching V1's behaviour of always including it when
+    /// configured, not depending on the user separately re-attaching it each run.
+    /// </summary>
+    private static IReadOnlyList<Attachment> BuildAttachments(HelperDefinition helper, IReadOnlyList<Attachment>? uploaded)
+    {
+        if (!helper.HasKnowledge || string.IsNullOrWhiteSpace(helper.KnowledgeData))
+        {
+            return uploaded ?? [];
+        }
+
+        var classification = AttachmentClassifier.ClassifyExtension(helper.KnowledgeFileType ?? "");
+        if (classification is not { } c)
+        {
+            return uploaded ?? [];
+        }
+
+        var knowledgeAttachment = new Attachment
+        {
+            Name = $"{helper.Name} reference document",
+            Kind = c.Kind,
+            Format = c.Format,
+            Bytes = Convert.FromBase64String(helper.KnowledgeData)
+        };
+
+        return uploaded is { Count: > 0 } ? [knowledgeAttachment, .. uploaded] : [knowledgeAttachment];
     }
 
     /// <summary>
@@ -90,22 +128,5 @@ public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAd
     {
         var match = Regex.Match(text, "```[a-zA-Z]*\\s*\\n(.*?)\\n```", RegexOptions.Singleline);
         return (match.Success ? match.Groups[1].Value : text).Trim();
-    }
-
-    private async Task<(decimal Spend, decimal Cap)> GetSpendAndCapAsync(string userEmail, CancellationToken cancellationToken)
-    {
-        var monthStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1, 0, 0, 0, DateTimeKind.Utc);
-
-        var rawSpend = await db.AccountingEntries
-            .Where(a => a.UserId == userEmail && a.Timestamp >= monthStart)
-            .SumAsync(a => (decimal?)a.Cost, cancellationToken) ?? 0m;
-
-        var cap = await db.SpendCaps
-            .Where(s => s.UserId == userEmail)
-            .Select(s => (decimal?)s.MonthlyCapAmount)
-            .FirstOrDefaultAsync(cancellationToken) ?? 1.0m;
-
-        // Matches V1: only 80% of actual spend counts against the cap.
-        return (rawSpend * 0.8m, cap);
     }
 }

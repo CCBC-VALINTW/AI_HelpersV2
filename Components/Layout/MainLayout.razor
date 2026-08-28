@@ -1,20 +1,35 @@
-﻿@inherits LayoutComponentBase
+﻿@implements IDisposable
+@inherits LayoutComponentBase
 @inject Services.ICurrentUserService CurrentUser
+@inject Services.ISpendStatusService SpendStatus
 
 <div class="page">
+    <input type="checkbox" id="sidebarCollapse" class="sidebar-collapse-checkbox"
+           onchange="localStorage.setItem('sidebarCollapsed', this.checked)" />
+    <script>
+        // Restore the collapsed/expanded state on full page load - in-app navigation between
+        // pages keeps this same DOM node (Blazor Server diffs, doesn't recreate the layout), so
+        // this only needs to run once per real page load, not per navigation.
+        document.getElementById('sidebarCollapse').checked = localStorage.getItem('sidebarCollapsed') === 'true';
+    </script>
     <div class="sidebar">
         <NavMenu />
     </div>
 
     <main>
         <div class="top-row px-4">
+            @if (SpendStatus.Loaded)
+            {
+                <span class="spend-status @SpendStatusCssClass">
+                    Used £@SpendStatus.CurrentSpend.ToString("0.00") of your £@SpendStatus.CurrentCap.ToString("0.00") allowance this month
+                </span>
+            }
             @if (_displayName is not null)
             {
                 <span class="signed-in-as">Signed in as @_displayName</span>
                 <a href="MicrosoftIdentity/Account/SignOut">Sign out</a>
             }
             <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
-            <img class="built-by-badge" src="badges/built-by-conwy.svg" alt="Built by Conwy / Wedi'i greu gan Conwy" />
         </div>
 
         <article class="content px-4">
@@ -32,18 +47,31 @@
 @code {
     private string? _displayName;
 
+    private string SpendStatusCssClass => SpendStatus.CurrentSpend >= SpendStatus.CurrentCap
+        ? "spend-status-over"
+        : SpendStatus.CurrentSpend >= SpendStatus.CurrentCap * 0.8m
+            ? "spend-status-warn"
+            : "";
+
     protected override async Task OnInitializedAsync()
     {
+        SpendStatus.Changed += OnSpendChanged;
         try
         {
             // Can be briefly reached with no signed-in user while AuthorizeRouteView is
-            // mid-redirecting an anonymous visitor to sign-in - leave the name blank rather
+            // mid-redirecting an anonymous visitor to sign-in - leave the name/spend blank rather
             // than crash the layout for that transient moment.
             _displayName = await CurrentUser.GetDisplayNameAsync();
+            var email = await CurrentUser.GetEmailAsync();
+            await SpendStatus.RefreshAsync(email);
         }
         catch (InvalidOperationException)
         {
             _displayName = null;
         }
     }
+
+    private void OnSpendChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => SpendStatus.Changed -= OnSpendChanged;
 }

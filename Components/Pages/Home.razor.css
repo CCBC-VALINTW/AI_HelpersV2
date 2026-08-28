@@ -1,0 +1,42 @@
+.category-tile {
+    padding: 0;
+    border-left: 4px solid var(--conwy-ramp-3, #158ab5);
+    transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+    .category-tile .card-body {
+        padding: 0.65rem 0.85rem;
+    }
+
+    .category-tile:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 0.25rem 0.5rem rgba(0, 0, 0, 0.1);
+    }
+
+.category-tile-name {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--conwy-base, #3f4851);
+}
+
+.category-tile-count {
+    font-size: 0.78rem;
+    color: #6c757d;
+}
+
+/* Consistent gold accent (not part of the rotating category cycle below) - matches the
+   favourite-star colour used elsewhere, so "this is a favourite" reads the same everywhere. */
+.favorite-tile {
+    border-left-color: #f5b301;
+    background-color: color-mix(in srgb, #f5b301 8%, white);
+}
+
+/* Subtle rotating tint + accent, cycling through the Conwy brand ramp - six colours, six tiles
+   before repeating. Kept light (a tinted background, not a solid fill) so it reads as a gentle
+   accent rather than a loud block of colour. */
+.category-tiles .col:nth-of-type(6n+1) .category-tile { border-left-color: var(--conwy-ramp-1, #565f90); background-color: color-mix(in srgb, var(--conwy-ramp-1, #565f90) 8%, white); }
+.category-tiles .col:nth-of-type(6n+2) .category-tile { border-left-color: var(--conwy-ramp-2, #31597c); background-color: color-mix(in srgb, var(--conwy-ramp-2, #31597c) 8%, white); }
+.category-tiles .col:nth-of-type(6n+3) .category-tile { border-left-color: var(--conwy-ramp-3, #158ab5); background-color: color-mix(in srgb, var(--conwy-ramp-3, #158ab5) 8%, white); }
+.category-tiles .col:nth-of-type(6n+4) .category-tile { border-left-color: var(--conwy-ramp-4, #1da6be); background-color: color-mix(in srgb, var(--conwy-ramp-4, #1da6be) 8%, white); }
+.category-tiles .col:nth-of-type(6n+5) .category-tile { border-left-color: var(--conwy-ramp-5, #24b7ba); background-color: color-mix(in srgb, var(--conwy-ramp-5, #24b7ba) 8%, white); }
+.category-tiles .col:nth-of-type(6n+6) .category-tile { border-left-color: var(--conwy-ramp-6, #29b5a3); background-color: color-mix(in srgb, var(--conwy-ramp-6, #29b5a3) 8%, white); }

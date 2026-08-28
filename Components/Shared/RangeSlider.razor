@@ -1,0 +1,33 @@
+<div>
+    <label class="form-label fw-semibold mb-1">@Label</label>
+    <p class="text-muted small mb-2">@Help</p>
+    <input type="range" class="form-range" min="1" max="5" step="1" value="@Value" @oninput="OnInput" />
+    <div class="d-flex justify-content-between small text-muted">
+        <span>1 — @MinLabel</span>
+        <span class="fw-semibold text-body">@CurrentLabel</span>
+        <span>5 — @MaxLabel</span>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string Label { get; set; } = "";
+    [Parameter] public string Help { get; set; } = "";
+    [Parameter] public string MinLabel { get; set; } = "";
+    [Parameter] public string MaxLabel { get; set; } = "";
+    [Parameter] public int Value { get; set; }
+    [Parameter] public EventCallback<int> ValueChanged { get; set; }
+    [Parameter] public IReadOnlyDictionary<int, string> Labels { get; set; } = new Dictionary<int, string>();
+
+    private string CurrentLabel => Labels.TryGetValue(Value, out var label) ? $"{Value} — {Capitalize(label)}" : Value.ToString();
+
+    private async Task OnInput(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var v))
+        {
+            Value = v;
+            await ValueChanged.InvokeAsync(v);
+        }
+    }
+
+    private static string Capitalize(string s) => string.IsNullOrEmpty(s) ? s : char.ToUpper(s[0]) + s[1..];
+}

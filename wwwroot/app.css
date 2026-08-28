@@ -24,6 +24,23 @@ html, body {
     font-family: var(--bs-body-font-family);
 }
 
+/* Shared here rather than duplicated per-page, since the same favourite-toggle look is used on
+   both the Helper catalog and the Helper detail page. */
+.favorite-star {
+    font-size: 1.3rem;
+    line-height: 1;
+    color: #adb5bd;
+    text-decoration: none;
+}
+
+    .favorite-star:hover {
+        color: #f5b301;
+    }
+
+    .favorite-star.is-favorite {
+        color: #f5b301;
+    }
+
 a, .btn-link {
     color: var(--conwy-green);
 }

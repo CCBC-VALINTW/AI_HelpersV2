@@ -47,6 +47,29 @@ else
 
     <a href="/helpers" class="btn btn-primary mb-4">Browse all Helpers</a>
 
+    @if (_favorites.Count > 0)
+    {
+        <h2 class="h4">Your favourites</h2>
+        <div class="row row-cols-2 row-cols-sm-3 row-cols-md-4 row-cols-lg-5 g-2 mb-4">
+            @foreach (var favorite in _favorites)
+            {
+                <div class="col">
+                    <a href="@($"/helpers/{favorite.Id}")" class="text-decoration-none">
+                        <div class="card h-100 category-tile favorite-tile">
+                            <div class="card-body">
+                                <div class="category-tile-name">★ @favorite.Name</div>
+                                @if (favorite.HelperCategory is not null)
+                                {
+                                    <div class="category-tile-count">@favorite.HelperCategory.Name</div>
+                                }
+                            </div>
+                        </div>
+                    </a>
+                </div>
+            }
+        </div>
+    }
+
     <h2 class="h4">Categories</h2>
     @if (_categories.Count == 0)
     {
@@ -54,15 +77,15 @@ else
     }
     else
     {
-        <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-3">
+        <div class="row row-cols-2 row-cols-sm-3 row-cols-md-4 row-cols-lg-5 g-2 category-tiles">
             @foreach (var (category, count) in _categories)
             {
                 <div class="col">
                     <a href="@($"/helpers?category={category.Id}")" class="text-decoration-none">
-                        <div class="card h-100">
+                        <div class="card h-100 category-tile">
                             <div class="card-body">
-                                <h5 class="card-title">@category.Name</h5>
-                                <p class="card-text text-muted small">@count Helper@(count == 1 ? "" : "s")</p>
+                                <div class="category-tile-name">@category.Name</div>
+                                <div class="category-tile-count">@count Helper@(count == 1 ? "" : "s")</div>
                             </div>
                         </div>
                     </a>
@@ -78,6 +101,7 @@ else
     private int _generalCount;
     private int _myCount;
     private List<(Data.Entities.HelperCategory Category, int Count)> _categories = [];
+    private List<Data.Entities.HelperDefinition> _favorites = [];
 
     protected override async Task OnInitializedAsync()
     {
@@ -97,6 +121,17 @@ else
             .Select(c => (c, visibleHelpers.Count(h => h.HelperCategoryId == c.Id)))
             .Where(x => x.Item2 > 0)
             .ToList();
+
+        var favoriteIds = await Db.HelperFavorites
+            .Where(f => f.UserEmail == email)
+            .Select(f => f.HelperDefinitionId)
+            .ToListAsync();
+
+        _favorites = await Db.HelperDefinitions
+            .Include(h => h.HelperCategory)
+            .Where(h => favoriteIds.Contains(h.Id) && (h.Scope == HelperScope.General || h.OwnerEmail == email))
+            .OrderBy(h => h.Name)
+            .ToListAsync();
 
         _loading = false;
     }

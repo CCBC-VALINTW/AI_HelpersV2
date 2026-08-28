@@ -1,13 +1,20 @@
 @page "/helpers/{Id:int}"
 @rendermode InteractiveServer
+@implements IAsyncDisposable
+@using System.Text.RegularExpressions
 @using AiHelpers.Contracts
 @using AiHelpers.Data
 @using AiHelpers.Data.Enums
+@using AiHelpers.Providers
 @using AiHelpers.Services
 @using Microsoft.EntityFrameworkCore
+@using Microsoft.JSInterop
 @inject AppDbContext Db
 @inject ICurrentUserService CurrentUser
 @inject IHelperInvocationService InvocationService
+@inject IOrganisationalInfoService OrgInfo
+@inject IUrlFetchService UrlFetch
+@inject IJSRuntime JS
 
 <PageTitle>@(_helper?.Name ?? "Helper")</PageTitle>
 
@@ -23,108 +30,353 @@ else if (_helper is null)
 }
 else
 {
-    <div class="d-flex justify-content-between align-items-start mb-3">
+    RenderFragment RenderWaitingPanel = @<div class="text-center border rounded p-4 mt-3 waiting-panel">
+        <div class="spinner-border text-primary mb-3" role="status"><span class="visually-hidden">Running…</span></div>
+        <p class="mb-1"><strong>Running… @FormatElapsed() elapsed</strong></p>
+        <p class="fst-italic text-muted mb-3">@_waitingPhrase</p>
+        <div class="waiting-idea-box mx-auto">
+            <div class="small text-uppercase fw-semibold mb-1">Something to do while you wait</div>
+            <div>@_waitingIdea</div>
+        </div>
+        <p class="text-muted small mt-3 mb-0">Long documents can take several minutes.</p>
+    </div>;
+
+    // Its own card, shown before Options and only when the Helper actually has questions -
+    // stays visible after the first run (not gated behind the "Run this Helper" card) so answers
+    // remain reachable and editable ahead of a Refine, same reasoning as RenderPreferenceToggles.
+    RenderFragment RenderContextQuestions = @<div class="d-flex flex-column gap-3">
+        @if (!string.IsNullOrWhiteSpace(_helper!.ContextQuestionsIntro))
+        {
+            <p class="text-muted small mb-0">@_helper.ContextQuestionsIntro</p>
+        }
+        @foreach (var answer in _contextAnswers)
+        {
+            <div>
+                <label class="form-label small mb-1">
+                    @answer.Question.Label
+                    @if (answer.Question.IsMandatory)
+                    {
+                        <span class="text-danger">*</span>
+                    }
+                </label>
+                @if (answer.Question.Type == ContextQuestionType.Text)
+                {
+                    <textarea class="form-control form-control-sm" rows="2" value="@answer.Text"
+                              @oninput="e => answer.Text = e.Value?.ToString() ?? string.Empty"></textarea>
+                }
+                else if (answer.Question.Type == ContextQuestionType.Document)
+                {
+                    <InputFile OnChange="e => OnContextFileSelected(answer, e)" class="form-control form-control-sm" />
+                    @if (answer.Document is not null)
+                    {
+                        <span class="text-muted small">@answer.Document.Name attached.</span>
+                    }
+                    @if (answer.Error is not null)
+                    {
+                        <div class="text-danger small">@answer.Error</div>
+                    }
+                }
+                else
+                {
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" checked="@answer.BoolValue"
+                               @onchange="e => answer.BoolValue = (bool)e.Value!" />
+                    </div>
+                }
+            </div>
+        }
+    </div>;
+
+    // Shared between the initial "Run this Helper" card and the post-output "Refine" panel -
+    // both toggles apply to whichever call comes next regardless of which card is visible when
+    // they're set (RunHelper and TweakHelper both flow through the same BuildEffectiveInput).
+    RenderFragment RenderPreferenceToggles = @<div class="d-flex flex-column gap-2">
         <div>
-            <h1 class="mb-1">@_helper.Name</h1>
-            <p class="text-muted mb-0">@_helper.Description</p>
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="useRoleInfo" @bind="_useRoleInfo" />
+                <label class="form-check-label small" for="useRoleInfo">Use my organisational info</label>
+            </div>
+            @if (_useRoleInfo)
+            {
+                <textarea class="form-control form-control-sm mt-1" rows="2"
+                          placeholder="e.g. job title, service, section..." @bind="_roleInfo"></textarea>
+            }
+        </div>
+
+        @if (_personalities.Count > 0)
+        {
+            <div>
+                <label class="form-label small mb-1" for="personalitySelect">Personality</label>
+                <select id="personalitySelect" class="form-select form-select-sm" @bind="_selectedPersonalityId">
+                    <option value="">None</option>
+                    @foreach (var p in _personalities)
+                    {
+                        <option value="@p.Id">@(p.Name)@(p.IsDefault ? " (default)" : "")</option>
+                    }
+                </select>
+            </div>
+        }
+    </div>;
+
+    <div class="d-flex justify-content-between align-items-start mb-3">
+        <div class="d-flex align-items-start gap-2">
+            <button type="button" class="btn btn-link p-0 favorite-star @(_isFavorite ? "is-favorite" : "")"
+                    title="@(_isFavorite ? "Remove from favourites" : "Add to favourites")" @onclick="ToggleFavorite">
+                @(_isFavorite ? "★" : "☆")
+            </button>
+            <div>
+                <h1 class="mb-1">@_helper.Name</h1>
+                <p class="text-muted mb-0">@((MarkupString)(_helper.Description ?? ""))</p>
+            </div>
         </div>
         <span class="badge @(_helper.Scope == HelperScope.General ? "text-bg-primary" : "text-bg-secondary") fs-6">
             @_helper.Scope
         </span>
     </div>
 
+    <div class="d-flex flex-wrap align-items-center gap-3 mb-4 p-3 border rounded helper-info-strip">
+        @if (_helper.IsExternal)
+        {
+            <span><strong>External Helper</strong> - proxies to an external service rather than calling an LLM directly.</span>
+        }
+        else if (_helper.LlmDefinition is not null)
+        {
+            <div class="d-flex align-items-center gap-2">
+                <strong>@_helper.LlmDefinition.Name</strong>
+                @if (_helper.LlmDefinition.SupportsText) { <span class="badge text-bg-light border">Text</span> }
+                @if (_helper.LlmDefinition.SupportsDocument) { <span class="badge text-bg-light border">Document</span> }
+                @if (_helper.LlmDefinition.SupportsImage) { <span class="badge text-bg-light border">Image</span> }
+                @if (_helper.Effort is not null) { <span class="badge text-bg-light border">Reasoning: @_helper.Effort</span> }
+            </div>
+
+            var (flagSvg, label) = ResidencyDisplay(_helper.LlmDefinition.Residency);
+            <div class="d-flex align-items-center gap-2 px-2 py-1 rounded residency-badge-compact">
+                <span class="residency-flag" aria-hidden="true">@((MarkupString)flagSvg)</span>
+                <span class="small fw-semibold">@label</span>
+            </div>
+        }
+        else
+        {
+            <span class="text-muted">No model configured.</span>
+        }
+
+        @if (_helper.HelperCategory is not null)
+        {
+            <span class="badge text-bg-light border">@_helper.HelperCategory.Name</span>
+        }
+
+        @if (_helper.HasKnowledge)
+        {
+            <span class="small text-muted">📚 Uses a knowledge source</span>
+        }
+        @if (_helper.AllowContext || _helper.ContextQuestions.Count > 0)
+        {
+            <span class="small text-muted">💬 Supports conversation context</span>
+        }
+    </div>
+
+    @if (_helper.IsExternal)
+    {
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <span class="text-muted small">This Helper opens an external tool.</span>
+            <a href="@BuildExternalUrl()" target="_blank" rel="noopener" class="btn btn-outline-secondary btn-sm">Open in a new tab ↗</a>
+        </div>
+        @if (IsInsecureExternalUrl)
+        {
+            <div class="alert alert-warning mb-4">
+                This tool is hosted at <code>@_helper.ExternalUrl</code>, which isn't served over HTTPS -
+                browsers block insecure content from being embedded in this (HTTPS) page, so it can't be
+                shown inline here. Use "Open in a new tab" above instead.
+            </div>
+        }
+        else
+        {
+            @* Deliberately not sandboxed, unlike the model-output iframe below - ExternalUrl is an
+               admin/owner-configured trusted value (same tier as Description/KnowledgePrompt), not
+               untrusted model output, and the external tool likely needs real script/cookie/navigation
+               access to actually function. If the site itself refuses to be framed (X-Frame-Options/
+               CSP frame-ancestors) this will render blank with no catchable error - the "open in a new
+               tab" link above is the fallback for that case too. *@
+            <div class="external-helper-frame mb-4">
+                <iframe src="@BuildExternalUrl()" class="external-helper-iframe" title="@_helper.Name"></iframe>
+            </div>
+        }
+    }
+    else
+    {
     <div class="row g-4">
         <div class="col-lg-8">
             <div class="card mb-4">
-                <div class="card-header">Run this Helper</div>
-                <div class="card-body">
-                    <label class="form-label" for="helperInput">Your input</label>
-                    <textarea id="helperInput" class="form-control mb-3" rows="6" @bind="_input"
-                              placeholder="Describe what you'd like this Helper to do…"></textarea>
-                    <button class="btn btn-primary" @onclick="RunHelper" disabled="@_running">
-                        @(_running ? "Running…" : "Run")
-                    </button>
-
-                    @if (_errorMessage is not null)
+                <div class="card-header d-flex align-items-center justify-content-between">
+                    <span>Run this Helper</span>
+                    @if (_output is not null)
                     {
-                        <div class="alert alert-danger mt-3 mb-0">@_errorMessage</div>
-                    }
-                    else if (_budgetExceeded)
-                    {
-                        <div class="alert alert-warning mt-3 mb-0">
-                            Monthly AI spend cap reached (£@_spend.ToString("0.00") of £@_cap.ToString("0.00")). Contact your service admin if you need this raised.
-                        </div>
-                    }
-                    else if (_output is not null)
-                    {
-                        <iframe class="border rounded mt-3 helper-output" srcdoc="@BuildOutputDocument(_output)" sandbox=""></iframe>
+                        <button type="button" class="btn btn-link btn-sm p-0" @onclick="ToggleInputCollapsed">
+                            @(_inputCollapsed ? "Show / edit ▾" : "Hide ▴")
+                        </button>
                     }
                 </div>
+                @if (_inputCollapsed)
+                {
+                    <div class="card-body py-2">
+                        <p class="text-muted small mb-0 fst-italic">@InputPreview()</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="card-body">
+                        <label class="form-label" for="helperInput">Your input</label>
+                        <textarea id="helperInput" @ref="_inputRef" class="mb-3 helper-input-editor"></textarea>
+
+                        @if (_helper.LlmDefinition is { } model && (model.SupportsDocument || model.SupportsImage))
+                        {
+                            <div class="mb-3">
+                                <label class="form-label small text-muted mb-1" for="attachmentInput">Attach files (optional)</label>
+                                <InputFile id="attachmentInput" OnChange="OnFilesSelected" multiple accept="@AttachmentAccept(model)" class="form-control form-control-sm" />
+                                @if (_attachmentError is not null)
+                                {
+                                    <div class="text-danger small mt-1">@_attachmentError</div>
+                                }
+                                @if (_attachments.Count > 0)
+                                {
+                                    <div class="d-flex flex-wrap gap-2 mt-2">
+                                        @foreach (var attachment in _attachments)
+                                        {
+                                            <span class="badge text-bg-light border d-flex align-items-center gap-2">
+                                                @attachment.Name
+                                                <button type="button" class="btn-close" style="font-size: 0.6rem;" aria-label="Remove attachment" @onclick="() => RemoveAttachment(attachment)"></button>
+                                            </span>
+                                        }
+                                    </div>
+                                }
+                            </div>
+
+                            @if (model.SupportsDocument)
+                            {
+                                <div class="mb-3">
+                                    <label class="form-label small text-muted mb-1" for="urlInput">Add content from a web page (optional)</label>
+                                    <div class="d-flex gap-2">
+                                        <input id="urlInput" class="form-control form-control-sm" placeholder="https://…"
+                                               value="@_urlInput" @oninput="e => _urlInput = e.Value?.ToString() ?? string.Empty" />
+                                        <button type="button" class="btn btn-outline-secondary btn-sm text-nowrap" @onclick="AddUrlAttachment"
+                                                disabled="@(_fetchingUrl || string.IsNullOrWhiteSpace(_urlInput))">
+                                            @(_fetchingUrl ? "Fetching…" : "Add")
+                                        </button>
+                                    </div>
+                                </div>
+                            }
+                        }
+
+                        @if (_output is null)
+                        {
+                            <div class="d-flex align-items-center justify-content-end gap-2 border-top pt-3">
+                                <button class="btn btn-primary btn-lg" @onclick="RunHelper" disabled="@(_running || !ContextAnswersValid)">
+                                    @(_running ? "Running…" : "Run")
+                                </button>
+                            </div>
+                            @if (!ContextAnswersValid)
+                            {
+                                <p class="text-danger small text-end mb-0 mt-1">Please answer all required questions in the panel on the right before running.</p>
+                            }
+
+                            @if (_running)
+                            {
+                                @RenderWaitingPanel
+                            }
+                        }
+                    </div>
+                }
             </div>
 
-            <div class="card">
-                <div class="card-header">Configuration</div>
-                <div class="card-body">
-                    @RenderField("Primary purpose", _helper.PrimaryPurpose)
-                    @RenderField("Methodology", _helper.Methodology)
-                    @RenderField("Style / tone", _helper.StyleTone)
-                    @RenderField("Output format", _helper.OutputFormat)
-                    @RenderField("Target audience", _helper.TargetAudience)
-                    @RenderField("Special instructions", _helper.SpecialInstructions)
+            @if (_output is not null)
+            {
+                <div class="card mb-4">
+                    <div class="card-header">Result</div>
+                    <div class="card-body">
+                        @if (_running)
+                        {
+                            @RenderWaitingPanel
+                        }
+                        else if (_editing)
+                        {
+                            <div class="d-flex justify-content-end gap-2 mb-2">
+                                <button type="button" class="btn btn-success btn-sm" @onclick="ApplyEdits">Apply changes</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="CancelEdit">Cancel</button>
+                            </div>
+                            <textarea @ref="_editorRef" class="helper-output-editor"></textarea>
+                        }
+                        else
+                        {
+                            <div class="d-flex align-items-center justify-content-between gap-2 mb-2 flex-wrap">
+                                <div class="d-flex align-items-center gap-2">
+                                    <label class="form-label mb-0" for="stylesheetPicker">Stylesheet</label>
+                                    <select id="stylesheetPicker" class="form-select form-select-sm w-auto" @bind="_selectedStylesheetId">
+                                        @foreach (var s in _stylesheets)
+                                        {
+                                            <option value="@s.Id">@s.Name</option>
+                                        }
+                                    </select>
+                                </div>
+                                <div class="d-flex align-items-center gap-2">
+                                    <a class="btn btn-outline-secondary btn-sm" href="@BuildOutputDataUri()" download="@(SanitizeFileName(_helper.Name) + ".html")">Download as HTML</a>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="OpenInNewTab">Open in new tab</button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="StartEditing">Edit the result</button>
+                                </div>
+                            </div>
+                            <iframe class="border rounded helper-output" srcdoc="@BuildOutputDocument(_output, GetSelectedCss())" sandbox=""></iframe>
+                        }
+                    </div>
                 </div>
-            </div>
+            }
         </div>
 
         <div class="col-lg-4">
-            <div class="card mb-3">
-                <div class="card-header">Model</div>
-                <div class="card-body">
-                    @if (_helper.IsExternal)
+            @if (_contextAnswers.Count > 0)
+            {
+                <div class="card mb-4">
+                    <div class="card-header">Context</div>
+                    <div class="card-body">
+                        @RenderContextQuestions
+                    </div>
+                </div>
+            }
+
+            <div class="card mb-4">
+                <div class="card-header">Options</div>
+                <div class="card-body d-flex flex-column gap-3">
+                    @if (_errorMessage is not null)
                     {
-                        <p class="mb-1"><strong>External Helper</strong></p>
-                        <p class="text-muted small mb-0">Proxies to an external service rather than calling an LLM directly.</p>
+                        <div class="alert alert-danger py-2 small mb-0">@_errorMessage</div>
                     }
-                    else if (_helper.LlmDefinition is not null)
+                    else if (_budgetExceeded)
                     {
-                        <p class="mb-1"><strong>@_helper.LlmDefinition.Name</strong></p>
-                        <p class="text-muted small mb-2">@_helper.LlmDefinition.Description</p>
-                        <div class="d-flex flex-wrap gap-1 mb-2">
-                            @if (_helper.LlmDefinition.SupportsText) { <span class="badge text-bg-light border">Text</span> }
-                            @if (_helper.LlmDefinition.SupportsDocument) { <span class="badge text-bg-light border">Document</span> }
-                            @if (_helper.LlmDefinition.SupportsImage) { <span class="badge text-bg-light border">Image</span> }
-                            @if (_helper.Effort is not null) { <span class="badge text-bg-light border">Reasoning: @_helper.Effort</span> }
+                        <div class="alert alert-warning py-2 small mb-0">
+                            Monthly AI spend cap reached (£@_spend.ToString("0.00") of £@_cap.ToString("0.00")).
                         </div>
-                        <p class="text-muted small mb-0">Residency: @_helper.LlmDefinition.Residency</p>
                     }
-                    else
+
+                    @RenderPreferenceToggles
+
+                    <div>
+                        <label class="form-label small mb-1" for="tweakInput">Refine this result</label>
+                        <textarea id="tweakInput" class="form-control form-control-sm mb-2" rows="3"
+                                  placeholder="@(_output is null ? "Run the Helper first to enable refinements" : "Optional - e.g. make it more formal. Leave blank if you've just changed an option above.")"
+                                  @bind="_tweakInput" disabled="@(_running || _output is null)"></textarea>
+                        <button type="button" class="btn btn-primary btn-sm w-100" @onclick="TweakHelper"
+                                disabled="@(_running || _output is null || (string.IsNullOrWhiteSpace(_tweakInput) && !OptionsChangedSinceLastRun()))">
+                            @(_running ? "Refining…" : "Refine")
+                        </button>
+                    </div>
+
+                    @if (_output is not null)
                     {
-                        <p class="text-muted mb-0">No model configured.</p>
+                        <button type="button" class="btn btn-link btn-sm p-0 text-start" @onclick="StartOver">Start a new run</button>
                     }
                 </div>
             </div>
-
-            @if (_helper.HelperCategory is not null)
-            {
-                <div class="card mb-3">
-                    <div class="card-header">Category</div>
-                    <div class="card-body">
-                        <p class="mb-0">@_helper.HelperCategory.Name</p>
-                    </div>
-                </div>
-            }
-
-            @if (_helper.HasKnowledge || _helper.AllowContext)
-            {
-                <div class="card">
-                    <div class="card-header">Extras</div>
-                    <div class="card-body">
-                        @if (_helper.HasKnowledge) { <p class="mb-1">📚 Uses a knowledge source</p> }
-                        @if (_helper.AllowContext) { <p class="mb-0">💬 Supports conversation context</p> }
-                    </div>
-                </div>
-            }
         </div>
     </div>
+    }
 
     <div class="mt-4">
         <a href="/helpers" class="btn btn-outline-secondary">Back to Helpers</a>
@@ -136,79 +388,909 @@ else
 
     private bool _loading = true;
     private Data.Entities.HelperDefinition? _helper;
-    private string _input = string.Empty;
+    private bool _inputEditorNeedsInit;
+    private bool _inputCollapsed;
+    private ElementReference _inputRef;
     private bool _running;
+    private DateTime? _runStartedAt;
+    private CancellationTokenSource? _runProgressCts;
+    private string _waitingPhrase = "";
+    private string _waitingIdea = "";
     private string? _errorMessage;
     private bool _budgetExceeded;
     private decimal _spend;
     private decimal _cap;
     private string? _output;
+    private List<Data.Entities.Stylesheet> _stylesheets = [];
+    private int? _selectedStylesheetId;
+    private bool _editing;
+    private bool _editorNeedsInit;
+    private ElementReference _editorRef;
+    private IJSObjectReference? _module;
+    private IJSObjectReference? _actionsModule;
+    private List<Attachment> _attachments = [];
+    private List<ContextAnswerState> _contextAnswers = [];
+
+    private class ContextAnswerState
+    {
+        public required Data.Entities.HelperContextQuestion Question { get; set; }
+        public string Text { get; set; } = "";
+        public Attachment? Document { get; set; }
+        public bool BoolValue { get; set; }
+        public string? Error { get; set; }
+    }
+
+    // A Boolean answer is always in a definite Yes/No state (never "blank"), so Mandatory has
+    // nothing extra to enforce there - only Text/Document can be left unanswered.
+    private bool ContextAnswersValid => _contextAnswers.All(a => !a.Question.IsMandatory || a.Question.Type switch
+    {
+        ContextQuestionType.Text => !string.IsNullOrWhiteSpace(a.Text),
+        ContextQuestionType.Document => a.Document is not null,
+        _ => true
+    });
+    private string? _attachmentError;
+    private string _urlInput = "";
+    private bool _fetchingUrl;
+    private string _email = "";
+    private bool _isFavorite;
+    private string _lastInput = "";
+    private string _tweakInput = "";
+    private string _lastOptionsSnapshot = "";
+    private bool _useRoleInfo;
+    private string _roleInfo = "";
+    private List<Data.Entities.PersonalityPrompt> _personalities = [];
+    private string _selectedPersonalityId = "";
+
+    // AWS doesn't publish exact per-file Converse API limits on its own reference pages - these
+    // are conservative, commonly-cited figures, not confirmed exact quotas. If they're off,
+    // Bedrock's own 400 response (surfaced verbatim by BedrockAdapter) is the real authority,
+    // same as how the temperature/top_p sampling-param limits got sorted out empirically.
+    private const long MaxDocumentBytes = 4_500_000;
+    private const long MaxImageBytes = 3_750_000;
+    private const int MaxAttachments = 5;
 
     protected override async Task OnInitializedAsync()
     {
-        var email = await CurrentUser.GetEmailAsync();
+        _email = await CurrentUser.GetEmailAsync();
 
         _helper = await Db.HelperDefinitions
             .Include(h => h.HelperCategory)
             .Include(h => h.LlmDefinition)
-            .Where(h => h.Id == Id && (h.Scope == HelperScope.General || h.OwnerEmail == email))
+            .Include(h => h.ContextQuestions)
+            .Where(h => h.Id == Id && (h.Scope == HelperScope.General || h.OwnerEmail == _email))
             .FirstOrDefaultAsync();
 
+        if (_helper is not null)
+        {
+            _contextAnswers = [.. _helper.ContextQuestions
+                .OrderBy(q => q.SortOrder)
+                .Select(q => new ContextAnswerState { Question = q })];
+        }
+
+        _stylesheets = await Db.Stylesheets.OrderBy(s => s.Name).ToListAsync();
+
         _loading = false;
+        if (_helper is not null)
+        {
+            // External Helpers never render the input editor's textarea (see the IsExternal
+            // branch above) - initialising TinyMCE against it anyway throws deep inside
+            // tinymce.min.js ("e.setAttribute is not a function", an invalid/default
+            // ElementReference) and crashes the whole circuit, not just this component.
+            _inputEditorNeedsInit = !_helper.IsExternal;
+            _isFavorite = await Db.HelperFavorites.AnyAsync(f => f.UserEmail == _email && f.HelperDefinitionId == _helper.Id);
+        }
+
+        // Role info is user-editable right here (no dedicated setup flow exists for it yet).
+        _roleInfo = (await Db.UserRoleInfos.FirstOrDefaultAsync(r => r.Email == _email))?.Info ?? "";
+        if (string.IsNullOrWhiteSpace(_roleInfo))
+        {
+            // First time this user has hit the page with nothing saved yet - try to pre-fill from
+            // their Entra directory profile via Graph. Best-effort only (see
+            // GraphOrganisationalInfoService); once they run once, SaveRoleInfoAsync persists
+            // whatever's in the box (Graph-sourced or hand-edited) and this lookup is skipped from
+            // then on.
+            var principal = await CurrentUser.GetPrincipalAsync();
+            _roleInfo = await OrgInfo.TryGetOrganisationalInfoAsync(principal) ?? "";
+        }
+        _useRoleInfo = !string.IsNullOrWhiteSpace(_roleInfo);
+
+        // Personalities are read-only/selectable here by design - they're created and edited on
+        // the dedicated /personality page (Components/Pages/PersonalityProfile.razor); this page
+        // only picks which one (if any) applies to the next call. Pre-selects whichever the user
+        // marked as their default, if any.
+        _personalities = await Db.PersonalityPrompts
+            .Where(p => p.Email == _email)
+            .OrderByDescending(p => p.IsDefault)
+            .ThenBy(p => p.Name)
+            .ToListAsync();
+        _selectedPersonalityId = _personalities.FirstOrDefault(p => p.IsDefault)?.Id.ToString() ?? "";
+    }
+
+    private async Task ToggleFavorite()
+    {
+        if (_helper is null) return;
+
+        var existing = await Db.HelperFavorites
+            .FirstOrDefaultAsync(f => f.UserEmail == _email && f.HelperDefinitionId == _helper.Id);
+
+        if (existing is not null)
+        {
+            Db.HelperFavorites.Remove(existing);
+            _isFavorite = false;
+        }
+        else
+        {
+            Db.HelperFavorites.Add(new Data.Entities.HelperFavorite { UserEmail = _email, HelperDefinitionId = _helper.Id, CreatedAt = DateTime.UtcNow });
+            _isFavorite = true;
+        }
+
+        await Db.SaveChangesAsync();
     }
 
     private async Task RunHelper()
     {
         if (_helper is null) return;
 
-        _running = true;
+        // Reading the input editor's content and collapsing/destroying it on success both now
+        // live in ExecuteAsync itself, shared with TweakHelper - a refine can involve exactly the
+        // same "input card was reopened and edited" situation as a first run.
+        await ExecuteAsync();
+    }
+
+    /// <summary>
+    /// Collapsing reads the live editor content back into _lastInput before tearing it down (so
+    /// nothing typed is lost); expanding re-creates it seeded from _lastInput via
+    /// _inputEditorNeedsInit, the same create/destroy lifecycle already used for the output
+    /// editor's own edit mode (StartEditing/CancelEdit/ApplyEdits).
+    /// </summary>
+    private async Task ToggleInputCollapsed()
+    {
+        if (_inputCollapsed)
+        {
+            _inputCollapsed = false;
+            _inputEditorNeedsInit = true;
+        }
+        else
+        {
+            var module = await GetModuleAsync();
+            var rawInput = await module.InvokeAsync<string>("getHtml", "input");
+            _lastInput = HtmlContentSanitizer.Sanitize(rawInput);
+            await module.InvokeVoidAsync("destroyEditor", "input");
+            _inputCollapsed = true;
+        }
+    }
+
+    /// <summary>
+    /// V1's `{#tweak}` mechanism, kept deliberately simple per Will's direction (a real
+    /// multi-turn conversation belongs in the future Helper editor/designer phase, not here) -
+    /// just folds an extra instruction into the same input string and re-runs as a fresh,
+    /// stateless call, exactly like V1 did. Each tweak builds on the previous one cumulatively
+    /// (not just the original input), so successive refinements stack.
+    /// </summary>
+    private async Task TweakHelper()
+    {
+        // The tweak box itself is optional - if the user has instead changed an option (org info,
+        // personality, a context answer) since the last run, that alone is reason enough to
+        // refine; only block when there's genuinely nothing new to feed in.
+        if (_helper is null || (string.IsNullOrWhiteSpace(_tweakInput) && !OptionsChangedSinceLastRun())) return;
+
+        if (_editing)
+        {
+            var module = await GetModuleAsync();
+            await module.InvokeVoidAsync("destroyEditor", "output");
+            _editing = false;
+        }
+
+        var tweak = _tweakInput.Trim();
+        _tweakInput = "";
+        if (!string.IsNullOrWhiteSpace(tweak))
+        {
+            _lastInput = string.IsNullOrWhiteSpace(_lastInput)
+                ? tweak
+                : $"{_lastInput}\n\nAdditional refinement instruction: {tweak}";
+        }
+
+        await ExecuteAsync();
+    }
+
+    private void StartOver()
+    {
+        _output = null;
         _errorMessage = null;
         _budgetExceeded = false;
-        _output = null;
+        _lastInput = "";
+        _tweakInput = "";
+        _attachments.Clear();
+        _attachmentError = null;
+        _contextAnswers = [.. _contextAnswers.Select(a => new ContextAnswerState { Question = a.Question })];
+        _selectedStylesheetId = null;
+        _editing = false;
+        _inputCollapsed = false;
+        _inputEditorNeedsInit = true;
+    }
+
+    /// <summary>
+    /// Shared core for a fresh run and a tweak/refinement - both are just a single stateless call
+    /// with a (possibly extended) input string, no conversation history involved.
+    /// </summary>
+    private async Task ExecuteAsync()
+    {
+        if (_helper is null) return;
+
+        // If the input card is currently expanded (either the first run, or the user re-opened it
+        // to edit ahead of a refine), the TinyMCE editor - not _lastInput - holds the live truth.
+        if (!_inputCollapsed && !_helper.IsExternal)
+        {
+            var inputModule = await GetModuleAsync();
+            var rawInput = await inputModule.InvokeAsync<string>("getHtml", "input");
+            _lastInput = HtmlContentSanitizer.Sanitize(rawInput);
+        }
+
+        var effectiveInput = BuildEffectiveInput(_lastInput);
+
+        _running = true;
+        _runStartedAt = DateTime.UtcNow;
+        _errorMessage = null;
+        _budgetExceeded = false;
+        RotateWaitingContent();
         StateHasChanged();
 
-        var email = await CurrentUser.GetEmailAsync();
-        var outcome = await InvocationService.RunAsync(_helper, _input, email);
+        _runProgressCts = new CancellationTokenSource();
+        _ = TickRunProgress(_runProgressCts.Token);
 
-        _budgetExceeded = outcome.BudgetExceeded;
-        _spend = outcome.Spend;
-        _cap = outcome.Cap;
-        _errorMessage = outcome.ErrorMessage;
-        _output = outcome.Response?.Documents.FirstOrDefault()?.Content;
+        try
+        {
+            await SaveRoleInfoAsync();
 
-        _running = false;
+            var email = await CurrentUser.GetEmailAsync();
+            var effectiveAttachments = _attachments
+                .Concat(_contextAnswers.Where(a => a.Document is not null).Select(a => a.Document!))
+                .ToList();
+            var outcome = await InvocationService.RunAsync(_helper, effectiveInput, email, effectiveAttachments);
+
+            _budgetExceeded = outcome.BudgetExceeded;
+            _spend = outcome.Spend;
+            _cap = outcome.Cap;
+            _errorMessage = outcome.ErrorMessage;
+
+            var newOutput = outcome.Response?.Documents.FirstOrDefault()?.Content;
+            if (newOutput is not null)
+            {
+                _output = newOutput;
+
+                // Mirrors V1: every Helper effectively has a stylesheet selected (even if it's an
+                // inert "No Stylesheet" one) - default to the Helper's own choice on the first run
+                // only; a later tweak shouldn't reset a stylesheet the user deliberately picked
+                // while reviewing the result.
+                _selectedStylesheetId ??= _helper.DefaultStylesheetId
+                    ?? _stylesheets.FirstOrDefault(s => !HasRealStyling(s.Css))?.Id;
+
+                // Snapshot of what fed this run, so a later Refine can tell whether org
+                // info/personality/context answers have changed even with an empty tweak box.
+                _lastOptionsSnapshot = BuildOptionsSnapshot();
+
+                // Collapse the input card on every successful run/refine, not just the first -
+                // its content is already synced into _lastInput above, so nothing is lost by
+                // tearing the editor down; the user can re-expand it via the card header to edit
+                // again ahead of a later refine.
+                if (!_inputCollapsed)
+                {
+                    var inputModule = await GetModuleAsync();
+                    await inputModule.InvokeVoidAsync("destroyEditor", "input");
+                    _inputCollapsed = true;
+                }
+            }
+        }
+        finally
+        {
+            _runProgressCts.Cancel();
+            _runProgressCts = null;
+            _running = false;
+            _runStartedAt = null;
+        }
     }
+
+    /// <summary>
+    /// Folds the "use my organisational info"/"use my personality" toggles into the input, V1's
+    /// exact framing (from the Granicus request template) for each. Applied fresh at call time
+    /// from the current toggle state, not baked into _lastInput, so turning a toggle off before a
+    /// later tweak actually stops sending it.
+    /// </summary>
+    private string BuildEffectiveInput(string baseInput)
+    {
+        var parts = new List<string>();
+        if (_useRoleInfo && !string.IsNullOrWhiteSpace(_roleInfo))
+        {
+            parts.Add($"Here is my role information, which you can use to contextualise or frame your response, or use directly in the output: {_roleInfo}");
+        }
+        if (int.TryParse(_selectedPersonalityId, out var personalityId) &&
+            _personalities.FirstOrDefault(p => p.Id == personalityId) is { } personality)
+        {
+            parts.Add($"Personality traits to use to colour the style of your response: {personality.Prompt}");
+        }
+        var contextParts = new List<string>();
+        foreach (var answer in _contextAnswers)
+        {
+            var instruction = string.IsNullOrWhiteSpace(answer.Question.UsageInstruction) ? null : answer.Question.UsageInstruction;
+
+            if (answer.Question.Type == ContextQuestionType.Text && !string.IsNullOrWhiteSpace(answer.Text))
+            {
+                contextParts.Add(instruction is null
+                    ? $"{answer.Question.Label}: {answer.Text}"
+                    : $"{answer.Question.Label}: {answer.Text} ({instruction})");
+            }
+            else if (answer.Question.Type == ContextQuestionType.Document && answer.Document is not null && instruction is not null)
+            {
+                contextParts.Add($"Regarding the attached document \"{answer.Document.Name}\" ({answer.Question.Label}): {instruction}");
+            }
+            else if (answer.Question.Type == ContextQuestionType.Boolean)
+            {
+                // Always included, unlike Text/Document - "No" is meaningful information too,
+                // there's no "blank" state to skip the way an empty text box has.
+                var value = answer.BoolValue ? "Yes" : "No";
+                contextParts.Add(instruction is null
+                    ? $"{answer.Question.Label}: {value}"
+                    : $"{answer.Question.Label}: {value} ({instruction})");
+            }
+        }
+        if (contextParts.Count > 0)
+        {
+            // Grouped under one header (not one parts[] entry per answer) and placed early, ahead
+            // of baseInput - reinforced again in BedrockAdapter's system prompt (recency-weighted,
+            // see ContextAnswersReinforcement) since these answers can now gate whether whole
+            // sections/features appear at all, not just add background colour to the response.
+            parts.Add("Context answers provided below - read all of these FIRST, before drafting your response, " +
+                "as they may change which sections or features your output should include:\n" +
+                string.Join("\n", contextParts));
+        }
+        parts.Add(baseInput);
+        return string.Join("\n\n", parts);
+    }
+
+    /// <summary>
+    /// A cheap fingerprint of everything BuildEffectiveInput folds in besides the typed tweak
+    /// text itself - lets Refine tell whether the user changed an option (org info, personality,
+    /// a context answer) since the last run, so a Refine with an empty tweak box is only blocked
+    /// when NOTHING has actually changed, not whenever the box happens to be empty.
+    /// </summary>
+    private string BuildOptionsSnapshot() => string.Join("|",
+        _useRoleInfo, _roleInfo,
+        _selectedPersonalityId,
+        string.Join(";", _contextAnswers.Select(a =>
+            $"{a.Question.Id}:{a.Text}:{a.Document?.Name}:{a.BoolValue}")));
+
+    private bool OptionsChangedSinceLastRun() => BuildOptionsSnapshot() != _lastOptionsSnapshot;
+
+    private async Task SaveRoleInfoAsync()
+    {
+        var trimmed = _roleInfo.Trim();
+        if (!_useRoleInfo || trimmed.Length == 0) return;
+
+        var existing = await Db.UserRoleInfos.FirstOrDefaultAsync(r => r.Email == _email);
+        if (existing is null)
+        {
+            Db.UserRoleInfos.Add(new Data.Entities.UserRoleInfo { Email = _email, Info = trimmed });
+        }
+        else if (existing.Info != trimmed)
+        {
+            existing.Info = trimmed;
+        }
+        else
+        {
+            return;
+        }
+
+        await Db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Real Helper calls have taken 20+ minutes for long documents (see the HttpClient.Timeout
+    /// bump in Program.cs) - without this, a long wait with zero visible change looks identical
+    /// to a hung app. Ticks every 5s via InvokeAsync since this runs as a detached background
+    /// task, not inline in the component's own render flow.
+    /// </summary>
+    private async Task TickRunProgress(CancellationToken token)
+    {
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(5), token);
+                RotateWaitingContent();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (TaskCanceledException)
+        {
+            // Expected once the run completes and cancels this loop.
+        }
+    }
+
+    private void RotateWaitingContent()
+    {
+        _waitingPhrase = WaitingPhrases[Random.Shared.Next(WaitingPhrases.Length)];
+        _waitingIdea = WaitingIdeas[Random.Shared.Next(WaitingIdeas.Length)];
+    }
+
+    // V1's GovService "please wait" screen (Conwy AI Helpers Govservice Process definition.json)
+    // had a whole rotating cast of these to keep users entertained during long waits - reinstated
+    // literally, same content, same spirit, minus the parts tied to V1's now-gone async
+    // architecture (a "check back later via the Helper Viewer, we'll email you" notice, since V2
+    // just awaits the call directly and has no job-viewer/email-notification feature to link to).
+    private static readonly string[] WaitingPhrases =
+    [
+        "Thunkin', chunkin', and funkin'...",
+        "Crunchin' numbers and munchin' data...",
+        "Wranglin' bits and bytes...",
+        "Spinnin' up some logic loops...",
+        "Juggling code like circus clowns...",
+        "Cooking up some algorithm stew...",
+        "Massaging the matrix...",
+        "Greasing the gears of computation...",
+        "Polishing the pixels...",
+        "Tickling the servers...",
+        "Doing the digital dance...",
+        "Shaking the syntax tree...",
+        "Compiling dreams into reality...",
+        "Running with scissors (safely)...",
+        "Taming the wild semicolons...",
+        "Funkin' up the functions...",
+        "Looping through the labyrinth...",
+        "Debugging with style...",
+        "Casting spells in JavaScript...",
+        "Herding cats and variables...",
+        "Squeezing logic through a straw...",
+        "Knitting code with quantum needles...",
+        "Flipping bits like pancakes...",
+        "Charging the flux capacitor...",
+        "Teleporting data across dimensions...",
+        "Wrestling with rogue APIs...",
+        "Painting rainbows in binary...",
+        "Sanding down the rough edges of logic...",
+        "Brewing coffee for the CPU...",
+        "Tuning the algorithm orchestra...",
+        "Feeding the data dragons...",
+        "Whistling while we wireframe...",
+        "Bouncing packets off satellites...",
+        "Sculpting code like Michelangelo...",
+        "Launching the hamster-powered servers...",
+        "Scribbling in the margins of memory...",
+        "Twirling through the task queue...",
+        "Hacking the mainframe (just kidding)...",
+        "Sifting through the sands of syntax...",
+        "Reticulating splines...",
+        "Confabulating the impossible...",
+        "Turning dreams into reality...",
+        "Wiring up the warp drive...",
+    ];
+
+    private static readonly string[] WaitingIdeas =
+    [
+        "Stretch your wrists - your keyboard will thank you.",
+        "Take a sip of water. Hydration > hesitation. 🚱",
+        "Look 20 feet away for 20 seconds (the 20-20-20 rule).",
+        "Rename one folder or document in your head... better already.",
+        "Do three chair squats. Quads say hi.",
+        "Close one browser tab you opened last Tuesday.",
+        "Send a quick thank-you to a teammate.",
+        "Practice box breathing: 4-in, 4-hold, 4-out, 4-hold.",
+        "Tidy a single desktop icon. Just one.",
+        "Roll your shoulders - clockwise, anticlockwise.",
+        "Glance out the window. Bonus points if you spot a bird.",
+        "Turn screen brightness down a notch - save those photons.",
+        "Write a TODO you'll actually do.",
+        "Refill your mug - you deserve it.",
+        "Stand up, shake out, sit back with posture level: 'excellent'.",
+        "Untangle your charging cable (metaphorical allowed).",
+        "Check that one notification you've been ignoring (or dismiss it).",
+        "Count how many shades of beige you can see in your office.",
+        "Imagine a penguin giving a TED Talk on productivity.",
+        "Invent a new colour in your mind.",
+        "Pretend your stapler is a tiny robot with a secret mission.",
+        "Write a haiku about your desk plant's inner thoughts.",
+        "Visualise a llama organising your inbox.",
+        "Plan a holiday for your favourite paperclip.",
+        "Picture your sticky notes as tiny trampolines.",
+        "Compose a theme song for your office chair.",
+        "Imagine your Wi-Fi as a heroic knight on a quest.",
+        "Think of three uses for a mug in a zombie apocalypse.",
+        "Pretend your monitor is a portal to another universe.",
+        "Give your desk a motivational speech.",
+        "Design a superhero with 'instant spreadsheet formatting'.",
+        "Imagine a conspiracy theory about the office fridge.",
+        "Pretend your calendar events are reality-show contestants.",
+        "Imagine your desk fan as a tiny helicopter saving the day.",
+        "Write a love letter to your highlighter.",
+        "Imagine filing cabinet drawers as tiny swimming pools.",
+        "Give your mouse pad a dramatic backstory.",
+    ];
+
+    private string FormatElapsed()
+    {
+        if (_runStartedAt is not { } start) return "";
+        var elapsed = DateTime.UtcNow - start;
+        return elapsed.TotalMinutes >= 1 ? $"{(int)elapsed.TotalMinutes}m {elapsed.Seconds}s" : $"{elapsed.Seconds}s";
+    }
+
+    private async Task OnFilesSelected(InputFileChangeEventArgs e)
+    {
+        _attachmentError = null;
+
+        // GetMultipleFiles throws if more than its maximum is selected in one go, rather than
+        // truncating - pass a generous ceiling here and let the loop below enforce MaxAttachments
+        // gracefully (a user-facing message, not an unhandled exception that tears down the
+        // circuit).
+        foreach (var file in e.GetMultipleFiles(maximumFileCount: 20))
+        {
+            if (_attachments.Count >= MaxAttachments)
+            {
+                _attachmentError = $"Only up to {MaxAttachments} attachments are supported per run.";
+                break;
+            }
+
+            var classification = AttachmentClassifier.ClassifyExtension(Path.GetExtension(file.Name));
+            if (classification is not { } c)
+            {
+                _attachmentError = $"\"{file.Name}\" isn't a supported file type.";
+                continue;
+            }
+
+            var supported = c.Kind == AttachmentKind.Document
+                ? _helper?.LlmDefinition?.SupportsDocument
+                : _helper?.LlmDefinition?.SupportsImage;
+            if (supported != true)
+            {
+                _attachmentError = $"This Helper's model doesn't support {(c.Kind == AttachmentKind.Document ? "document" : "image")} attachments.";
+                continue;
+            }
+
+            var maxBytes = c.Kind == AttachmentKind.Image ? MaxImageBytes : MaxDocumentBytes;
+            if (file.Size > maxBytes)
+            {
+                _attachmentError = $"\"{file.Name}\" is too large ({file.Size / 1_000_000.0:0.0} MB) - the limit is {maxBytes / 1_000_000.0:0.0} MB.";
+                continue;
+            }
+
+            try
+            {
+                using var stream = file.OpenReadStream(maxAllowedSize: maxBytes);
+                using var buffer = new MemoryStream();
+                await stream.CopyToAsync(buffer);
+                _attachments.Add(new Attachment { Name = file.Name, Kind = c.Kind, Format = c.Format, Bytes = buffer.ToArray() });
+            }
+            catch (IOException)
+            {
+                _attachmentError = $"\"{file.Name}\" is too large - the limit is {maxBytes / 1_000_000.0:0.0} MB.";
+            }
+        }
+    }
+
+    private void RemoveAttachment(Attachment attachment) => _attachments.Remove(attachment);
+
+    private async Task OnContextFileSelected(ContextAnswerState answer, InputFileChangeEventArgs e)
+    {
+        answer.Error = null;
+        answer.Document = null;
+        var file = e.File;
+        if (file is null) return;
+
+        var classification = AttachmentClassifier.ClassifyExtension(Path.GetExtension(file.Name));
+        if (classification is not { } c)
+        {
+            answer.Error = $"\"{file.Name}\" isn't a supported file type.";
+            return;
+        }
+
+        var maxBytes = c.Kind == AttachmentKind.Image ? MaxImageBytes : MaxDocumentBytes;
+        if (file.Size > maxBytes)
+        {
+            answer.Error = $"\"{file.Name}\" is too large ({file.Size / 1_000_000.0:0.0} MB) - the limit is {maxBytes / 1_000_000.0:0.0} MB.";
+            return;
+        }
+
+        try
+        {
+            using var stream = file.OpenReadStream(maxAllowedSize: maxBytes);
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer);
+            answer.Document = new Attachment { Name = file.Name, Kind = c.Kind, Format = c.Format, Bytes = buffer.ToArray() };
+        }
+        catch (IOException)
+        {
+            answer.Error = $"\"{file.Name}\" is too large - the limit is {maxBytes / 1_000_000.0:0.0} MB.";
+        }
+    }
+
+    private async Task AddUrlAttachment()
+    {
+        _attachmentError = null;
+        var url = _urlInput.Trim();
+        if (string.IsNullOrWhiteSpace(url)) return;
+
+        if (_attachments.Count >= MaxAttachments)
+        {
+            _attachmentError = $"Only up to {MaxAttachments} attachments are supported per run.";
+            return;
+        }
+
+        _fetchingUrl = true;
+        StateHasChanged();
+
+        var result = await UrlFetch.FetchAsync(url, MaxDocumentBytes);
+
+        _fetchingUrl = false;
+
+        if (!result.Success || result.Bytes is null || result.Format is null)
+        {
+            _attachmentError = result.ErrorMessage ?? "Couldn't fetch that URL.";
+            return;
+        }
+
+        var displayName = Uri.TryCreate(result.FinalUrl, UriKind.Absolute, out var finalUri)
+            ? finalUri.GetLeftPart(UriPartial.Path)
+            : url;
+
+        _attachments.Add(new Attachment { Name = displayName, Kind = AttachmentKind.Document, Format = result.Format, Bytes = result.Bytes });
+        _urlInput = "";
+    }
+
+    private static string AttachmentAccept(Data.Entities.LlmDefinition model)
+    {
+        var parts = new List<string>();
+        if (model.SupportsDocument) parts.Add(".pdf,.csv,.doc,.docx,.xls,.xlsx,.html,.htm,.txt,.md,.vtt");
+        if (model.SupportsImage) parts.Add(".png,.jpg,.jpeg,.gif,.webp");
+        return string.Join(",", parts);
+    }
+
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_inputEditorNeedsInit && _helper is { IsExternal: false })
+        {
+            _inputEditorNeedsInit = false;
+            var module = await GetModuleAsync();
+            // Seeded from _lastInput, not always blank - on a fresh page load _lastInput is
+            // already "" so this behaves the same as before for a first run, but re-expanding the
+            // collapsed input card after a run needs to show what's actually there, not an empty
+            // editor (the underlying state would be intact either way, but the user would see an
+            // apparently-blank box for a run that already has real input behind it).
+            await module.InvokeVoidAsync("createEditor", "input", _inputRef, HtmlContentSanitizer.Sanitize(_lastInput), "Paste or type the content to process here - or attach files / add a URL below.", 220);
+        }
+
+        if (_editorNeedsInit)
+        {
+            _editorNeedsInit = false;
+            var module = await GetModuleAsync();
+            await module.InvokeVoidAsync("createEditor", "output", _editorRef, HtmlContentSanitizer.Sanitize(_output ?? string.Empty), null, 512);
+        }
+    }
+
+    private void StartEditing()
+    {
+        _editing = true;
+        _editorNeedsInit = true;
+    }
+
+    private async Task CancelEdit()
+    {
+        var module = await GetModuleAsync();
+        await module.InvokeVoidAsync("destroyEditor", "output");
+        _editing = false;
+    }
+
+    private async Task ApplyEdits()
+    {
+        var module = await GetModuleAsync();
+        var html = await module.InvokeAsync<string>("getHtml", "output");
+        await module.InvokeVoidAsync("destroyEditor", "output");
+
+        // Defense in depth: TipTap constrains structure to its own schema, but re-sanitize before
+        // this becomes the new source-of-truth output that flows into BuildOutputDocument anyway.
+        _output = HtmlContentSanitizer.Sanitize(html);
+        _editing = false;
+    }
+
+    private async Task<IJSObjectReference> GetModuleAsync() =>
+        _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "/js/tinymceEditor.js");
+
+    private async Task OpenInNewTab()
+    {
+        if (_output is null) return;
+        _actionsModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "/js/outputActions.js");
+        await _actionsModule.InvokeVoidAsync("openInNewTab", BuildOutputDocument(_output, GetSelectedCss()));
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.InvokeVoidAsync("destroyEditor", "input");
+                await _module.InvokeVoidAsync("destroyEditor", "output");
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit already gone (e.g. browser tab closed) - nothing to clean up.
+            }
+        }
+
+        if (_actionsModule is not null)
+        {
+            try
+            {
+                await _actionsModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit already gone - nothing to clean up.
+            }
+        }
+    }
+
+    private string? GetSelectedCss() =>
+        _stylesheets.FirstOrDefault(s => s.Id == _selectedStylesheetId)?.Css;
+
+    /// <summary>
+    /// A stylesheet row can exist purely as a placeholder (V1's migrated "No Stylesheet" row is
+    /// literally the empty tag "&lt;style&gt;&lt;/style&gt;") - checked by content, not by name,
+    /// so any other near-empty stylesheet behaves the same way.
+    /// </summary>
+    private static bool HasRealStyling(string? css) =>
+        !string.IsNullOrWhiteSpace(css) &&
+        !string.IsNullOrWhiteSpace(Regex.Replace(css, "</?style[^>]*>", "", RegexOptions.IgnoreCase));
 
     /// <summary>
     /// Wraps model output as a standalone HTML document for an iframe. This is genuine
     /// browser-level isolation, not a convention the model has to cooperate with - unlike V1's
     /// "wrap everything in a rendDoc div" prompt instruction, a &lt;style&gt; block inside here
     /// cannot leak out to (or be affected by) the host page, and sandbox="" blocks scripts.
+    ///
+    /// Composes the chosen Stylesheet's CSS at render time, not at invocation time, so switching
+    /// stylesheets never needs to re-run the Helper - matches V1's runtime swap behaviour. When a
+    /// real stylesheet is applied, any &lt;style&gt; block the model embedded itself (from being
+    /// run under "No Stylesheet", where it has free rein) is stripped first so it can't fight the
+    /// chosen stylesheet's rules; under "No Stylesheet" the model's own styling is left intact.
+    ///
+    /// Every migrated V1 stylesheet scopes its rules under a ".rendDoc" wrapper class (V1's
+    /// prompt told the model to wrap its whole response in one) - confirmed against the real
+    /// Stylesheets table, e.g. "General Professional" is entirely ".rendDoc h1", ".rendDoc
+    /// table", etc. V2's model output has no such wrapper, so without adding it here every
+    /// stylesheet's selectors match nothing and picking a different one has no visible effect.
+    /// Added at render time rather than via a prompt instruction, so it applies uniformly
+    /// (including to output produced before this fix, and regardless of what the model does).
     /// </summary>
-    private static string BuildOutputDocument(string bodyHtml) => $$"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-        <meta charset="utf-8" />
-        <style>body { font-family: Calibri, Arial, sans-serif; margin: 1rem; }</style>
-        </head>
-        <body>{{bodyHtml}}</body>
-        </html>
+    private static string BuildOutputDocument(string bodyHtml, string? stylesheetCss)
+    {
+        var applyStylesheet = HasRealStyling(stylesheetCss);
+        var body = applyStylesheet ? StripEmbeddedStyles(bodyHtml) : bodyHtml;
+
+        return $$"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+            <meta charset="utf-8" />
+            <style>body { font-family: Calibri, Arial, sans-serif; margin: 1rem; }</style>
+            {{(applyStylesheet ? stylesheetCss : "")}}
+            </head>
+            <body><div class="rendDoc">{{body}}</div></body>
+            </html>
+            """;
+    }
+
+    private static string StripEmbeddedStyles(string html) =>
+        Regex.Replace(html, "<style[^>]*>.*?</style>", "", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+    /// <summary>
+    /// Some Helpers produce full interactive HTML apps (charts, drill-downs, embedded scripts) -
+    /// the preview iframe's sandbox="" deliberately blocks all script execution (that's what
+    /// fixed the earlier XSS/style-leak issue), so those never worked there and never will. This
+    /// is V1's escape hatch (download / open in a new tab so the app can "run freely") rather
+    /// than an alternative to the sandboxed preview.
+    ///
+    /// Used for "Download as HTML" only - a data: URI with the `download` attribute is a save
+    /// action, not a navigation, so it isn't affected by browsers blocking top-level navigation
+    /// to data: URLs (confirmed in testing: this is why "Open in new tab" needed a different
+    /// mechanism entirely - see wwwroot/js/outputActions.js). Still genuinely isolated regardless:
+    /// a data: URI gets a separate, opaque origin, so whatever scripts the downloaded file
+    /// contains have no access to this app's session cookie if later opened, unlike serving it
+    /// from this app's own origin would. A blob: URL was considered instead but rejected: unlike
+    /// data:, a blob: URL's origin for same-origin-policy purposes is the CREATING page's origin,
+    /// so script inside it could still make authenticated same-origin requests back to this app
+    /// using the ambient session cookie - it wouldn't actually provide the isolation this needs.
+    /// </summary>
+    private string BuildOutputDataUri() =>
+        "data:text/html;charset=utf-8;base64," + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(BuildOutputDocument(_output!, GetSelectedCss())));
+
+    private static string SanitizeFileName(string name)
+    {
+        var invalid = System.IO.Path.GetInvalidFileNameChars();
+        var cleaned = new string([.. name.Select(c => invalid.Contains(c) ? '-' : c)]);
+        return string.IsNullOrWhiteSpace(cleaned) ? "helper-output" : cleaned;
+    }
+
+    /// <summary>Short plain-text preview shown when the input card is collapsed, so there's still
+    /// some visibility into what's there without needing to expand it every time.</summary>
+    private string InputPreview()
+    {
+        if (string.IsNullOrWhiteSpace(_lastInput)) return "(no text input)";
+        var plain = Regex.Replace(_lastInput, "<[^>]*>", " ");
+        plain = Regex.Replace(plain, @"\s+", " ").Trim();
+        if (plain.Length == 0) return "(no text input)";
+        return plain.Length <= 140 ? plain : plain[..140].TrimEnd() + "…";
+    }
+
+    private string BuildExternalUrl()
+    {
+        var url = _helper!.ExternalUrl ?? "";
+        var separator = url.Contains('?') ? '&' : '?';
+        return $"{url}{separator}email={Uri.EscapeDataString(_email)}";
+    }
+
+    // This app is always served over HTTPS - a plain http:// ExternalUrl can never be embedded in
+    // an iframe here, browsers block it as mixed content regardless of anything this app does.
+    private bool IsInsecureExternalUrl =>
+        Uri.TryCreate(_helper?.ExternalUrl, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttp;
+
+    /// <summary>
+    /// V1 showed a literal flag + "Processed in X" line so data residency was immediately
+    /// obvious, not buried in muted small text - reinstated here rather than just naming the
+    /// enum value. V1 inferred EU-vs-not from the model identifier string; V2's explicit
+    /// ModelResidency enum makes that direct, and adds a real "Global" case V1 didn't visually
+    /// distinguish.
+    ///
+    /// Uses small self-authored inline SVGs rather than Unicode flag emoji (🇬🇧/🇪🇺) - Windows'
+    /// emoji font support for flags is inconsistent across browser/OS build combinations and
+    /// commonly doesn't render them at all, showing nothing. SVG has no such font dependency and
+    /// renders identically everywhere. Also avoids re-introducing V1's external Wikimedia image
+    /// hotlink - this content is developer-authored, static markup, so MarkupString is safe here
+    /// (unlike anywhere this project renders model/user-supplied content).
+    /// </summary>
+    private static (string FlagSvg, string Label) ResidencyDisplay(ModelResidency residency) => residency switch
+    {
+        ModelResidency.UK => (UkFlagSvg, "Processed in the UK"),
+        ModelResidency.EU => (EuFlagSvg, "Processed in the EU"),
+        _ => (GlobalFlagSvg, "No fixed data residency"),
+    };
+
+    private const string UkFlagSvg = """
+        <svg viewBox="0 0 60 36" xmlns="http://www.w3.org/2000/svg">
+            <rect width="60" height="36" fill="#00247d"/>
+            <path d="M0,0 L60,36 M60,0 L0,36" stroke="#fff" stroke-width="6"/>
+            <path d="M0,0 L60,36 M60,0 L0,36" stroke="#cf142b" stroke-width="2"/>
+            <path d="M30,0 V36 M0,18 H60" stroke="#fff" stroke-width="10"/>
+            <path d="M30,0 V36 M0,18 H60" stroke="#cf142b" stroke-width="6"/>
+        </svg>
         """;
 
-    private static RenderFragment RenderField(string label, string? value) => builder =>
-    {
-        if (string.IsNullOrWhiteSpace(value)) return;
+    private const string EuFlagSvg = """
+        <svg viewBox="0 0 60 36" xmlns="http://www.w3.org/2000/svg">
+            <rect width="60" height="36" fill="#003399"/>
+            <g fill="#ffcc00">
+                <circle cx="40.00" cy="18.00" r="1.4"/>
+                <circle cx="38.66" cy="23.00" r="1.4"/>
+                <circle cx="35.00" cy="26.66" r="1.4"/>
+                <circle cx="30.00" cy="28.00" r="1.4"/>
+                <circle cx="25.00" cy="26.66" r="1.4"/>
+                <circle cx="21.34" cy="23.00" r="1.4"/>
+                <circle cx="20.00" cy="18.00" r="1.4"/>
+                <circle cx="21.34" cy="13.00" r="1.4"/>
+                <circle cx="25.00" cy="9.34" r="1.4"/>
+                <circle cx="30.00" cy="8.00" r="1.4"/>
+                <circle cx="35.00" cy="9.34" r="1.4"/>
+                <circle cx="38.66" cy="13.00" r="1.4"/>
+            </g>
+        </svg>
+        """;
 
-        builder.OpenElement(0, "div");
-        builder.AddAttribute(1, "class", "mb-3");
-        builder.OpenElement(2, "div");
-        builder.AddAttribute(3, "class", "text-muted small text-uppercase");
-        builder.AddContent(4, label);
-        builder.CloseElement();
-        builder.OpenElement(5, "div");
-        builder.AddContent(6, value);
-        builder.CloseElement();
-        builder.CloseElement();
-    };
+    private const string GlobalFlagSvg = """
+        <svg viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="18" cy="18" r="16" fill="none" stroke="#3f4851" stroke-width="2"/>
+            <ellipse cx="18" cy="18" rx="7" ry="16" fill="none" stroke="#3f4851" stroke-width="1.5"/>
+            <line x1="2" y1="18" x2="34" y2="18" stroke="#3f4851" stroke-width="1.5"/>
+            <line x1="4" y1="10" x2="32" y2="10" stroke="#3f4851" stroke-width="1"/>
+            <line x1="4" y1="26" x2="32" y2="26" stroke="#3f4851" stroke-width="1"/>
+        </svg>
+        """;
 }

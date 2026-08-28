@@ -52,6 +52,13 @@ public class HelperDefinition
     public bool AllowContext { get; set; }
     public string? ContextPrompt { get; set; }
 
+    /// <summary>Helper-specific questions asked of the user before running, in SortOrder.</summary>
+    public ICollection<HelperContextQuestion> ContextQuestions { get; set; } = [];
+
+    /// <summary>Optional framing text shown above the context questions on the run page, explaining
+    /// why they're being asked - e.g. "This helps me build you a fully rounded report from the outset."</summary>
+    public string? ContextQuestionsIntro { get; set; }
+
     public bool HasKnowledge { get; set; }
     public string? KnowledgeData { get; set; }
     public string? KnowledgeFileType { get; set; }

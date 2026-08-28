@@ -1,0 +1,82 @@
+@page "/helpers/editor"
+@rendermode InteractiveServer
+@using AiHelpers.Data
+@using AiHelpers.Data.Entities
+@using AiHelpers.Data.Enums
+@using AiHelpers.Services
+@using Microsoft.EntityFrameworkCore
+@inject AppDbContext Db
+@inject ICurrentUserService CurrentUser
+
+<PageTitle>Helper Editor</PageTitle>
+
+<div class="d-flex align-items-center justify-content-between mb-2">
+    <h1 class="mb-0">Helper Editor</h1>
+    <a href="/helpers/editor/new" class="btn btn-primary">+ New Helper</a>
+</div>
+<p class="text-muted">
+    @(_isAdmin
+        ? "Create and manage Helpers - General Helpers are shared with everyone, Personal ones belong to a single user."
+        : "Create and manage your own Helpers. General Helpers (shared with everyone) are managed by administrators.")
+</p>
+
+@if (_loading)
+{
+    <p><em>Loading…</em></p>
+}
+else if (_helpers.Count == 0)
+{
+    <p class="text-muted">You haven't created any Helpers yet.</p>
+}
+else
+{
+    <table class="table align-middle">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Scope</th>
+                <th>Category</th>
+                <th>Model</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var h in _helpers)
+            {
+                <tr>
+                    <td>@h.Name</td>
+                    <td><span class="badge @(h.Scope == HelperScope.General ? "text-bg-primary" : "text-bg-secondary")">@h.Scope</span></td>
+                    <td>@(h.HelperCategory?.Name ?? "—")</td>
+                    <td>@(h.IsExternal ? "External" : h.LlmDefinition?.Name ?? "—")</td>
+                    <td class="text-end">
+                        <a href="@($"/helpers/editor/{h.Id}")" class="btn btn-outline-secondary btn-sm">Edit</a>
+                        <a href="@($"/helpers/{h.Id}")" class="btn btn-outline-secondary btn-sm">Open</a>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private bool _loading = true;
+    private bool _isAdmin;
+    private List<HelperDefinition> _helpers = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var email = await CurrentUser.GetEmailAsync();
+        _isAdmin = await CurrentUser.IsAdminAsync();
+
+        var query = Db.HelperDefinitions
+            .Include(h => h.HelperCategory)
+            .Include(h => h.LlmDefinition)
+            .AsQueryable();
+
+        _helpers = await (_isAdmin ? query : query.Where(h => h.OwnerEmail == email))
+            .OrderBy(h => h.Name)
+            .ToListAsync();
+
+        _loading = false;
+    }
+}

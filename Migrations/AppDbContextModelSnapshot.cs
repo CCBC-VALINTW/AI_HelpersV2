@@ -214,6 +214,44 @@ namespace AiHelpers.Migrations
                     b.ToTable("HelperCategories");
                 });
 
+            modelBuilder.Entity("AiHelpers.Data.Entities.HelperContextQuestion", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("HelperDefinitionId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsMandatory")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<string>("UsageInstruction")
+                        .HasMaxLength(1024)
+                        .HasColumnType("nvarchar(1024)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HelperDefinitionId");
+
+                    b.ToTable("HelperContextQuestions");
+                });
+
             modelBuilder.Entity("AiHelpers.Data.Entities.HelperDefinition", b =>
                 {
                     b.Property<int>("Id")
@@ -236,6 +274,10 @@ namespace AiHelpers.Migrations
                     b.Property<string>("ContextPrompt")
                         .HasMaxLength(2048)
                         .HasColumnType("nvarchar(2048)");
+
+                    b.Property<string>("ContextQuestionsIntro")
+                        .HasMaxLength(1024)
+                        .HasColumnType("nvarchar(1024)");
 
                     b.Property<decimal?>("Creativity")
                         .HasPrecision(8, 5)
@@ -331,6 +373,35 @@ namespace AiHelpers.Migrations
                         });
                 });
 
+            modelBuilder.Entity("AiHelpers.Data.Entities.HelperFavorite", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("HelperDefinitionId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("UserEmail")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HelperDefinitionId");
+
+                    b.HasIndex("UserEmail", "HelperDefinitionId")
+                        .IsUnique();
+
+                    b.ToTable("HelperFavorites");
+                });
+
             modelBuilder.Entity("AiHelpers.Data.Entities.LlmDefinition", b =>
                 {
                     b.Property<int>("Id")
@@ -416,10 +487,23 @@ namespace AiHelpers.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("AnswersJson")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("Email")
                         .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)")
+                        .HasDefaultValue("My personality");
 
                     b.Property<string>("Prompt")
                         .IsRequired()
@@ -428,6 +512,10 @@ namespace AiHelpers.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("Email")
+                        .IsUnique()
+                        .HasFilter("[IsDefault] = 1");
+
+                    b.HasIndex("Email", "Name")
                         .IsUnique();
 
                     b.ToTable("PersonalityPrompts");
@@ -524,6 +612,32 @@ namespace AiHelpers.Migrations
                     b.ToTable("Stylesheets");
                 });
 
+            modelBuilder.Entity("AiHelpers.Data.Entities.UserRoleInfo", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("Info")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Email")
+                        .IsUnique();
+
+                    b.ToTable("UserRoleInfos");
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey", b =>
                 {
                     b.Property<int>("Id")
@@ -573,6 +687,17 @@ namespace AiHelpers.Migrations
                     b.Navigation("HelperDefinition");
                 });
 
+            modelBuilder.Entity("AiHelpers.Data.Entities.HelperContextQuestion", b =>
+                {
+                    b.HasOne("AiHelpers.Data.Entities.HelperDefinition", "HelperDefinition")
+                        .WithMany("ContextQuestions")
+                        .HasForeignKey("HelperDefinitionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("HelperDefinition");
+                });
+
             modelBuilder.Entity("AiHelpers.Data.Entities.HelperDefinition", b =>
                 {
                     b.HasOne("AiHelpers.Data.Entities.Stylesheet", "DefaultStylesheet")
@@ -597,6 +722,17 @@ namespace AiHelpers.Migrations
                     b.Navigation("LlmDefinition");
                 });
 
+            modelBuilder.Entity("AiHelpers.Data.Entities.HelperFavorite", b =>
+                {
+                    b.HasOne("AiHelpers.Data.Entities.HelperDefinition", "HelperDefinition")
+                        .WithMany()
+                        .HasForeignKey("HelperDefinitionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("HelperDefinition");
+                });
+
             modelBuilder.Entity("AiHelpers.Data.Entities.HelperCategory", b =>
                 {
                     b.Navigation("Helpers");
@@ -607,6 +743,8 @@ namespace AiHelpers.Migrations
                     b.Navigation("AccountingEntries");
 
                     b.Navigation("CallbackEntries");
+
+                    b.Navigation("ContextQuestions");
 
                     b.Navigation("FeedbackEntries");
                 });

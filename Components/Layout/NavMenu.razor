@@ -1,6 +1,12 @@
 <div class="top-row ps-3 navbar navbar-dark">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="">AI Helpers</a>
+    <div class="container-fluid d-flex align-items-center justify-content-between px-0">
+        <a class="navbar-brand" href=""><span class="nav-link-text">AI Helpers</span></a>
+        <label for="sidebarCollapse" class="sidebar-collapse-btn" title="Collapse menu" role="button">
+            <span class="bi bi-collapse-nav-menu" aria-hidden="true"></span>
+        </label>
+    </div>
+    <div class="built-by-badge-row nav-link-text">
+        <img class="built-by-badge-sidebar" src="badges/built-by-conwy.svg" alt="Built by Conwy / Wedi'i greu gan Conwy" />
     </div>
 </div>
 
@@ -9,22 +15,34 @@
 <div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
     <nav class="nav flex-column">
         <div class="nav-item px-3">
-            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Home
+            <NavLink class="nav-link" href="" Match="NavLinkMatch.All" title="Home">
+                <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> <span class="nav-link-text">Home</span>
             </NavLink>
         </div>
 
         <div class="nav-item px-3">
-            <NavLink class="nav-link" href="helpers">
-                <span class="bi bi-grid-fill-nav-menu" aria-hidden="true"></span> Helpers
+            <NavLink class="nav-link" href="helpers" title="Helpers">
+                <span class="bi bi-grid-fill-nav-menu" aria-hidden="true"></span> <span class="nav-link-text">Helpers</span>
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="personality" title="Personality Profile">
+                <span class="bi bi-personality-nav-menu" aria-hidden="true"></span> <span class="nav-link-text">Personality</span>
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="helpers/editor" title="Helper Editor">
+                <span class="bi bi-editor-nav-menu" aria-hidden="true"></span> <span class="nav-link-text">Helper Editor</span>
             </NavLink>
         </div>
 
         @if (_isAdmin)
         {
             <div class="nav-item px-3">
-                <NavLink class="nav-link" href="admin/credentials">
-                    <span class="bi bi-gear-fill-nav-menu" aria-hidden="true"></span> Admin
+                <NavLink class="nav-link" href="admin/credentials" title="Admin">
+                    <span class="bi bi-gear-fill-nav-menu" aria-hidden="true"></span> <span class="nav-link-text">Admin</span>
                 </NavLink>
             </div>
         }

@@ -1,0 +1,23 @@
+<div>
+    <label class="form-label fw-semibold mb-1">@Label</label>
+    <p class="text-muted small mb-2">@Help</p>
+    @foreach (var option in Options)
+    {
+        <div class="form-check">
+            <input class="form-check-input" type="radio" name="@GroupKey" id="@(GroupKey + "-" + option.Value)"
+                   checked="@(SelectedValue == option.Value)" @onchange="() => Select(option.Value)" />
+            <label class="form-check-label" for="@(GroupKey + "-" + option.Value)">@option.Label</label>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string Label { get; set; } = "";
+    [Parameter] public string Help { get; set; } = "";
+    [Parameter] public string GroupKey { get; set; } = "";
+    [Parameter] public IReadOnlyList<(string Value, string Label)> Options { get; set; } = [];
+    [Parameter] public string? SelectedValue { get; set; }
+    [Parameter] public EventCallback<string> SelectedValueChanged { get; set; }
+
+    private Task Select(string value) => SelectedValueChanged.InvokeAsync(value);
+}

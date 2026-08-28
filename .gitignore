@@ -9,6 +9,9 @@
 # Contains sensitive schema/integration info and example credentials - never commit
 /Project Info/
 
+# npm dependencies for the TinyMCE vendoring helper script
+/client/node_modules/
+
 # Reference material only (brand assets, style guides) - not app source
 /Design brief/
 

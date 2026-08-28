@@ -1,0 +1,805 @@
+@page "/helpers/editor/new"
+@page "/helpers/editor/{Id:int}"
+@rendermode InteractiveServer
+@using AiHelpers.Data
+@using AiHelpers.Data.Entities
+@using AiHelpers.Data.Enums
+@using AiHelpers.Providers
+@using AiHelpers.Services
+@using Microsoft.EntityFrameworkCore
+@inject AppDbContext Db
+@inject ICurrentUserService CurrentUser
+@inject NavigationManager Nav
+
+<PageTitle>@(Id is null ? "New Helper" : "Edit Helper")</PageTitle>
+
+@if (_loading)
+{
+    <p><em>Loading…</em></p>
+}
+else if (!_authorized)
+{
+    <h1>Not authorized</h1>
+    <p class="text-muted">You don't have permission to edit this Helper.</p>
+    <a href="/helpers/editor" class="btn btn-outline-secondary">Back to Helper Editor</a>
+}
+else
+{
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <h1 class="mb-0">@(Id is null ? "New Helper" : $"Edit: {_name}")</h1>
+        <a href="/helpers/editor" class="btn btn-link">Back to list</a>
+    </div>
+
+    <div class="row g-4">
+    <div class="col-lg-8">
+
+    <ul class="nav nav-pills editor-tabs mb-3">
+        <li class="nav-item">
+            <button type="button" class="nav-link @(_activeTab == EditorTab.Basics ? "active" : "")" @onclick="() => _activeTab = EditorTab.Basics">Basics</button>
+        </li>
+        @if (!_isExternal)
+        {
+            <li class="nav-item">
+                <button type="button" class="nav-link @(_activeTab == EditorTab.Model ? "active" : "")" @onclick="() => _activeTab = EditorTab.Model">Model</button>
+            </li>
+            <li class="nav-item">
+                <button type="button" class="nav-link @(_activeTab == EditorTab.Prompt ? "active" : "")" @onclick="() => _activeTab = EditorTab.Prompt">Prompt</button>
+            </li>
+            <li class="nav-item">
+                <button type="button" class="nav-link @(_activeTab == EditorTab.Knowledge ? "active" : "")" @onclick="() => _activeTab = EditorTab.Knowledge">Knowledge</button>
+            </li>
+            <li class="nav-item">
+                <button type="button" class="nav-link @(_activeTab == EditorTab.Context ? "active" : "")" @onclick="() => _activeTab = EditorTab.Context">Context</button>
+            </li>
+            <li class="nav-item">
+                <button type="button" class="nav-link @(_activeTab == EditorTab.Output ? "active" : "")" @onclick="() => _activeTab = EditorTab.Output">Output</button>
+            </li>
+        }
+    </ul>
+
+    <div class="editor-panel mb-4">
+        @if (_activeTab == EditorTab.Basics)
+        {
+            <div class="d-flex flex-column gap-3">
+                <div>
+                    <label class="form-label" for="name">Name</label>
+                    <input id="name" class="form-control" maxlength="200" value="@_name"
+                           @oninput="e => _name = e.Value?.ToString() ?? string.Empty" />
+                </div>
+                <div>
+                    <label class="form-label" for="description">Description</label>
+                    <textarea id="description" class="form-control" rows="2" value="@_description"
+                              @oninput="e => _description = e.Value?.ToString() ?? string.Empty"></textarea>
+                </div>
+
+                <div class="row g-3">
+                    @if (_isAdmin)
+                    {
+                        <div class="col-sm-4">
+                            <label class="form-label" for="scope">Scope</label>
+                            <select id="scope" class="form-select" @bind="_scope">
+                                <option value="@HelperScope.Personal">Personal</option>
+                                <option value="@HelperScope.General">General (shared with everyone)</option>
+                            </select>
+                        </div>
+                        @if (_scope == HelperScope.Personal)
+                        {
+                            <div class="col-sm-4">
+                                <label class="form-label" for="ownerEmail">Owner email</label>
+                                <input id="ownerEmail" class="form-control" value="@_ownerEmail"
+                                       @oninput="e => _ownerEmail = e.Value?.ToString() ?? string.Empty" />
+                            </div>
+                        }
+                    }
+                    <div class="col-sm-4">
+                        <label class="form-label" for="category">Category</label>
+                        @if (_showNewCategory)
+                        {
+                            <div class="d-flex gap-2">
+                                <input class="form-control" placeholder="New category name" value="@_newCategoryName" maxlength="128"
+                                       @oninput="e => _newCategoryName = e.Value?.ToString() ?? string.Empty" />
+                                <button type="button" class="btn btn-outline-secondary text-nowrap" @onclick="AddCategoryAsync"
+                                        disabled="@string.IsNullOrWhiteSpace(_newCategoryName)">Add</button>
+                                <button type="button" class="btn btn-link text-nowrap" @onclick="() => _showNewCategory = false">Cancel</button>
+                            </div>
+                            @if (_newCategoryError is not null)
+                            {
+                                <div class="text-danger small mt-1">@_newCategoryError</div>
+                            }
+                        }
+                        else
+                        {
+                            <div class="d-flex gap-2">
+                                <select id="category" class="form-select" @bind="_categoryId">
+                                    <option value="">None</option>
+                                    @foreach (var c in _categories)
+                                    {
+                                        <option value="@c.Id">@c.Name</option>
+                                    }
+                                </select>
+                                <button type="button" class="btn btn-outline-secondary text-nowrap" @onclick="StartNewCategory">+ New</button>
+                            </div>
+                        }
+                    </div>
+                </div>
+                @if (!_isAdmin)
+                {
+                    <p class="text-muted small mb-0">This is a Personal Helper, owned by you (@_ownerEmail).</p>
+                }
+
+                <hr class="my-1" />
+
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="isExternal" checked="@_isExternal"
+                           @onchange="SetIsExternal" />
+                    <label class="form-check-label" for="isExternal">External Helper (proxies to a URL instead of calling an LLM directly)</label>
+                </div>
+                @if (_isExternal)
+                {
+                    <div>
+                        <label class="form-label" for="externalUrl">External URL</label>
+                        <input id="externalUrl" class="form-control" value="@_externalUrl"
+                               @oninput="e => _externalUrl = e.Value?.ToString() ?? string.Empty" />
+                    </div>
+                }
+            </div>
+        }
+        else if (_activeTab == EditorTab.Model)
+        {
+            <div class="d-flex flex-column gap-3">
+                <div class="row g-3">
+                    <div class="col-sm-6">
+                        <label class="form-label" for="model">LLM</label>
+                        <select id="model" class="form-select" @bind="_llmDefinitionId">
+                            <option value="">None selected</option>
+                            @foreach (var m in _models)
+                            {
+                                <option value="@m.Id">@m.Name</option>
+                            }
+                        </select>
+                    </div>
+                    @if (SelectedModel is { SupportsReasoning: true })
+                    {
+                        <div class="col-sm-6">
+                            <label class="form-label" for="effort">Reasoning effort</label>
+                            <select id="effort" class="form-select" @bind="_effort">
+                                <option value="">Off</option>
+                                <option value="@EffortLevel.Low">Low</option>
+                                <option value="@EffortLevel.Medium">Medium</option>
+                                <option value="@EffortLevel.High">High</option>
+                            </select>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+        else if (_activeTab == EditorTab.Prompt)
+        {
+            <div class="d-flex flex-column gap-3">
+                <p class="text-muted small mb-0">
+                    These describe this Helper's intent and are what you'll come back to edit later - they're
+                    the source of truth, kept separate from however the prompt is ultimately assembled or optimised.
+                </p>
+                <div>
+                    <label class="form-label" for="primaryPurpose">Primary purpose</label>
+                    <textarea id="primaryPurpose" class="form-control" rows="2" value="@_primaryPurpose"
+                              @oninput="e => _primaryPurpose = e.Value?.ToString() ?? string.Empty"></textarea>
+                </div>
+                <div>
+                    <label class="form-label" for="methodology">Methodology</label>
+                    <textarea id="methodology" class="form-control" rows="2" value="@_methodology"
+                              @oninput="e => _methodology = e.Value?.ToString() ?? string.Empty"></textarea>
+                </div>
+                <div>
+                    <label class="form-label" for="styleTone">Style / tone</label>
+                    <textarea id="styleTone" class="form-control" rows="2" value="@_styleTone"
+                              @oninput="e => _styleTone = e.Value?.ToString() ?? string.Empty"></textarea>
+                </div>
+                <div>
+                    <label class="form-label" for="outputFormat">Output format</label>
+                    <textarea id="outputFormat" class="form-control" rows="2" value="@_outputFormat"
+                              @oninput="e => _outputFormat = e.Value?.ToString() ?? string.Empty"></textarea>
+                </div>
+                <div>
+                    <label class="form-label" for="targetAudience">Target audience</label>
+                    <textarea id="targetAudience" class="form-control" rows="2" value="@_targetAudience"
+                              @oninput="e => _targetAudience = e.Value?.ToString() ?? string.Empty"></textarea>
+                </div>
+                <div>
+                    <label class="form-label" for="specialInstructions">Special instructions</label>
+                    <textarea id="specialInstructions" class="form-control" rows="3" value="@_specialInstructions"
+                              @oninput="e => _specialInstructions = e.Value?.ToString() ?? string.Empty"></textarea>
+                </div>
+            </div>
+        }
+        else if (_activeTab == EditorTab.Knowledge)
+        {
+            <div class="d-flex flex-column gap-3">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="hasKnowledge" checked="@_hasKnowledge"
+                           @onchange="e => _hasKnowledge = (bool)e.Value!" />
+                    <label class="form-check-label" for="hasKnowledge">Attach a reference/template document, always sent with every run</label>
+                </div>
+                @if (_hasKnowledge)
+                {
+                    @if (!string.IsNullOrWhiteSpace(_knowledgeData))
+                    {
+                        <div class="border rounded p-2">
+                            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                                <span class="text-muted small">Attached document (.@_knowledgeFileType)</span>
+                                <div class="d-flex gap-3">
+                                    @if (IsTextKnowledgeFormat)
+                                    {
+                                        <button type="button" class="btn btn-link btn-sm p-0" @onclick="ToggleKnowledgeText">
+                                            @(_showKnowledgeText ? "Hide" : "View / edit")
+                                        </button>
+                                    }
+                                    <a class="btn btn-link btn-sm p-0" href="@KnowledgeDownloadUri()" download="@KnowledgeDownloadFileName()">Download</a>
+                                    <button type="button" class="btn btn-link btn-sm p-0 text-danger" @onclick="RemoveKnowledge">Remove</button>
+                                </div>
+                            </div>
+                            @if (_showKnowledgeText && IsTextKnowledgeFormat)
+                            {
+                                <textarea class="form-control font-monospace small mt-2" rows="12" value="@_knowledgeText"
+                                          @oninput="e => SetKnowledgeText(e.Value?.ToString() ?? string.Empty)"></textarea>
+                                <p class="text-muted small mb-0 mt-1">Edits here are saved when you save the Helper.</p>
+                            }
+                        </div>
+                    }
+                    <div>
+                        <label class="form-label small mb-1" for="knowledgeFile">@(string.IsNullOrWhiteSpace(_knowledgeData) ? "Upload document" : "Replace document")</label>
+                        <InputFile id="knowledgeFile" OnChange="OnKnowledgeFileSelected" class="form-control form-control-sm" />
+                        @if (_knowledgeError is not null)
+                        {
+                            <div class="text-danger small mt-1">@_knowledgeError</div>
+                        }
+                    </div>
+                    <div>
+                        <label class="form-label" for="knowledgePrompt">How should the Helper use this document?</label>
+                        <textarea id="knowledgePrompt" class="form-control" rows="2" value="@_knowledgePrompt"
+                                  @oninput="e => _knowledgePrompt = e.Value?.ToString() ?? string.Empty"></textarea>
+                    </div>
+                }
+            </div>
+        }
+        else if (_activeTab == EditorTab.Context)
+        {
+            <div class="d-flex flex-column gap-3">
+                <div>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="allowContext" checked="@_allowContext"
+                               @onchange="e => _allowContext = (bool)e.Value!" />
+                        <label class="form-check-label" for="allowContext">Show a "supports additional context" indicator on the run page</label>
+                    </div>
+                    <p class="text-muted small mb-0 mt-1">
+                        Informational only for now - not yet wired to a real input. Use the context
+                        questions below for an actual working "extra document/answer" prompt.
+                    </p>
+                </div>
+
+                <hr class="my-1" />
+
+                <div>
+                    <h6 class="mb-1">Context questions</h6>
+                    <p class="text-muted small mb-2">
+                        Ask the user for specific extra information before running - e.g. "Which portfolio
+                        holder should be consulted?" for a committee report. Text answers are folded into
+                        the input; document answers are sent alongside any files the user uploads.
+                    </p>
+
+                    <div class="mb-3">
+                        <label class="form-label small mb-1" for="contextQuestionsIntro">Framing statement shown to the user (optional)</label>
+                        <textarea id="contextQuestionsIntro" class="form-control form-control-sm" rows="2" value="@_contextQuestionsIntro"
+                                  placeholder="e.g. The information requested below is typically needed to produce a committee report - this helps me build you a fully rounded report from the outset."
+                                  @oninput="e => _contextQuestionsIntro = e.Value?.ToString() ?? string.Empty"></textarea>
+                    </div>
+
+                    @for (var i = 0; i < _contextQuestions.Count; i++)
+                    {
+                        var index = i;
+                        var q = _contextQuestions[index];
+                        <div class="border rounded p-2 mb-2">
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-5">
+                                    <label class="form-label small mb-1">Question</label>
+                                    <input class="form-control form-control-sm" maxlength="256" value="@q.Label"
+                                           placeholder="e.g. Which portfolio holder should be consulted?"
+                                           @oninput="e => q.Label = e.Value?.ToString() ?? string.Empty" />
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label small mb-1">Answer type</label>
+                                    <select class="form-select form-select-sm" @bind="q.Type">
+                                        <option value="@ContextQuestionType.Text">Free text</option>
+                                        <option value="@ContextQuestionType.Document">Document upload</option>
+                                        <option value="@ContextQuestionType.Boolean">Yes / No</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="@("mandatory-" + index)" checked="@q.IsMandatory"
+                                               @onchange="e => q.IsMandatory = (bool)e.Value!" />
+                                        <label class="form-check-label small" for="@("mandatory-" + index)">Mandatory</label>
+                                    </div>
+                                </div>
+                                <div class="col-md-2 d-flex gap-1 justify-content-end">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@(index == 0)"
+                                            @onclick="() => MoveContextQuestion(index, -1)" title="Move up">↑</button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@(index == _contextQuestions.Count - 1)"
+                                            @onclick="() => MoveContextQuestion(index, 1)" title="Move down">↓</button>
+                                    <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => _contextQuestions.RemoveAt(index)" title="Remove">✕</button>
+                                </div>
+                            </div>
+                            <div class="mt-2">
+                                <label class="form-label small mb-1">How should the Helper use this? (optional)</label>
+                                <input class="form-control form-control-sm" maxlength="1024" value="@q.UsageInstruction"
+                                       placeholder="e.g. Use this to determine who signs off the report"
+                                       @oninput="e => q.UsageInstruction = e.Value?.ToString() ?? string.Empty" />
+                            </div>
+                        </div>
+                    }
+
+                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => _contextQuestions.Add(new QuestionDraft())">+ Add question</button>
+                </div>
+            </div>
+        }
+        else if (_activeTab == EditorTab.Output)
+        {
+            <div class="d-flex flex-column gap-3">
+                <div>
+                    <label class="form-label" for="stylesheet">Default stylesheet</label>
+                    <select id="stylesheet" class="form-select" style="max-width: 24rem;" @bind="_stylesheetId">
+                        <option value="">None</option>
+                        @foreach (var s in _stylesheets)
+                        {
+                            <option value="@s.Id">@s.Name</option>
+                        }
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label" for="outputSchema">Output JSON schema (advanced, optional)</label>
+                    <p class="text-muted small mb-1">
+                        When set (and the model supports structured output), the model's response can be forced to
+                        conform to this JSON Schema instead of - or alongside - a generated document. Not yet used by
+                        any run - reserved for the upcoming output-template feature.
+                    </p>
+                    <textarea id="outputSchema" class="form-control font-monospace small" rows="4" value="@_outputSchemaJson"
+                              @oninput="e => _outputSchemaJson = e.Value?.ToString() ?? string.Empty"></textarea>
+                </div>
+            </div>
+        }
+    </div>
+
+    @if (_saveError is not null)
+    {
+        <div class="alert alert-danger">@_saveError</div>
+    }
+
+    <div class="editor-actionbar">
+        <button type="button" class="btn btn-primary" @onclick="SaveAsync" disabled="@(_saving || string.IsNullOrWhiteSpace(_name))">
+            @(_saving ? "Saving…" : "Save")
+        </button>
+        <a href="/helpers/editor" class="btn btn-outline-secondary">Cancel</a>
+
+        @if (Id is not null)
+        {
+            <div class="ms-auto">
+                @if (_confirmDelete)
+                {
+                    <button type="button" class="btn btn-danger" @onclick="DeleteAsync">Confirm delete</button>
+                    <button type="button" class="btn btn-link" @onclick="() => _confirmDelete = false">Cancel</button>
+                }
+                else
+                {
+                    <button type="button" class="btn btn-outline-danger" @onclick="() => _confirmDelete = true">Delete Helper</button>
+                }
+            </div>
+        }
+    </div>
+
+    </div>
+    <div class="col-lg-4">
+        <div class="editor-preview-pane">
+            <p class="text-muted small mb-0">Test runs and conversational refinement will appear here.</p>
+        </div>
+    </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int? Id { get; set; }
+
+    private const long MaxKnowledgeBytes = 4_500_000;
+
+    private enum EditorTab { Basics, Model, Prompt, Knowledge, Context, Output }
+    private EditorTab _activeTab = EditorTab.Basics;
+
+    private bool _loading = true;
+    private bool _authorized = true;
+    private bool _saving;
+    private bool _confirmDelete;
+    private string? _saveError;
+    private string _email = "";
+    private bool _isAdmin;
+
+    private string _name = "";
+    private string _description = "";
+    private HelperScope _scope = HelperScope.Personal;
+    private string _ownerEmail = "";
+    private string _categoryId = "";
+    private bool _showNewCategory;
+    private string _newCategoryName = "";
+    private string? _newCategoryError;
+
+    private bool _isExternal;
+    private string _externalUrl = "";
+
+    private string _llmDefinitionId = "";
+    private string _effort = "";
+
+    private string _primaryPurpose = "";
+    private string _methodology = "";
+    private string _styleTone = "";
+    private string _outputFormat = "";
+    private string _targetAudience = "";
+    private string _specialInstructions = "";
+
+    private bool _hasKnowledge;
+    private string? _knowledgeData;
+    private string? _knowledgeFileType;
+    private string _knowledgePrompt = "";
+    private string? _knowledgeError;
+    private bool _showKnowledgeText;
+    private string _knowledgeText = "";
+
+    private static readonly HashSet<string> TextKnowledgeFormats = ["txt", "md", "csv", "html", "htm", "vtt"];
+    private bool IsTextKnowledgeFormat => _knowledgeFileType is not null && TextKnowledgeFormats.Contains(_knowledgeFileType);
+
+    private bool _allowContext;
+    private List<QuestionDraft> _contextQuestions = [];
+    private string _contextQuestionsIntro = "";
+
+    private class QuestionDraft
+    {
+        public int? Id { get; set; }
+        public string Label { get; set; } = "";
+        public ContextQuestionType Type { get; set; } = ContextQuestionType.Text;
+        public bool IsMandatory { get; set; }
+        public string UsageInstruction { get; set; } = "";
+    }
+
+    private string _stylesheetId = "";
+    private string _outputSchemaJson = "";
+
+    private List<LlmDefinition> _models = [];
+    private List<HelperCategory> _categories = [];
+    private List<Stylesheet> _stylesheets = [];
+
+    private LlmDefinition? SelectedModel => int.TryParse(_llmDefinitionId, out var id) ? _models.FirstOrDefault(m => m.Id == id) : null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _email = await CurrentUser.GetEmailAsync();
+        _isAdmin = await CurrentUser.IsAdminAsync();
+        _ownerEmail = _email;
+
+        _models = await Db.LlmDefinitions.OrderBy(m => m.Name).ToListAsync();
+        _categories = await Db.HelperCategories.OrderBy(c => c.Name).ToListAsync();
+        _stylesheets = await Db.Stylesheets.OrderBy(s => s.Name).ToListAsync();
+
+        if (Id is { } id)
+        {
+            var existing = await Db.HelperDefinitions
+                .Include(h => h.ContextQuestions)
+                .FirstOrDefaultAsync(h => h.Id == id);
+            if (existing is null)
+            {
+                _authorized = false;
+            }
+            else if (!_isAdmin && (existing.Scope != HelperScope.Personal || existing.OwnerEmail != _email))
+            {
+                _authorized = false;
+            }
+            else
+            {
+                LoadFrom(existing);
+            }
+        }
+        else if (!_isAdmin)
+        {
+            _scope = HelperScope.Personal;
+        }
+
+        _loading = false;
+    }
+
+    private void LoadFrom(HelperDefinition h)
+    {
+        _name = h.Name;
+        _description = h.Description ?? "";
+        _scope = h.Scope;
+        _ownerEmail = h.OwnerEmail ?? _email;
+        _categoryId = h.HelperCategoryId?.ToString() ?? "";
+
+        _isExternal = h.IsExternal;
+        _externalUrl = h.ExternalUrl ?? "";
+
+        _llmDefinitionId = h.LlmDefinitionId?.ToString() ?? "";
+        _effort = h.Effort?.ToString() ?? "";
+
+        _primaryPurpose = h.PrimaryPurpose ?? "";
+        _methodology = h.Methodology ?? "";
+        _styleTone = h.StyleTone ?? "";
+        _outputFormat = h.OutputFormat ?? "";
+        _targetAudience = h.TargetAudience ?? "";
+        _specialInstructions = h.SpecialInstructions ?? "";
+
+        _hasKnowledge = h.HasKnowledge;
+        _knowledgeData = h.KnowledgeData;
+        _knowledgeFileType = h.KnowledgeFileType;
+        _knowledgePrompt = h.KnowledgePrompt ?? "";
+
+        _allowContext = h.AllowContext;
+        _contextQuestions = h.ContextQuestions
+            .OrderBy(q => q.SortOrder)
+            .Select(q => new QuestionDraft
+            {
+                Id = q.Id,
+                Label = q.Label,
+                Type = q.Type,
+                IsMandatory = q.IsMandatory,
+                UsageInstruction = q.UsageInstruction ?? ""
+            })
+            .ToList();
+        _contextQuestionsIntro = h.ContextQuestionsIntro ?? "";
+
+        _stylesheetId = h.DefaultStylesheetId?.ToString() ?? "";
+        _outputSchemaJson = h.OutputSchemaJson ?? "";
+    }
+
+    private void MoveContextQuestion(int index, int delta)
+    {
+        var newIndex = index + delta;
+        if (newIndex < 0 || newIndex >= _contextQuestions.Count) return;
+        (_contextQuestions[index], _contextQuestions[newIndex]) = (_contextQuestions[newIndex], _contextQuestions[index]);
+    }
+
+    private void StartNewCategory()
+    {
+        _showNewCategory = true;
+        _newCategoryName = "";
+        _newCategoryError = null;
+    }
+
+    private async Task AddCategoryAsync()
+    {
+        var name = _newCategoryName.Trim();
+        if (string.IsNullOrWhiteSpace(name)) return;
+
+        if (_categories.Any(c => c.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+        {
+            _newCategoryError = $"A category named \"{name}\" already exists.";
+            return;
+        }
+
+        // Categories are shared reference data (like Stylesheets/LlmDefinitions), not owned by
+        // this Helper - created immediately rather than staged until the Helper itself is saved.
+        var category = new HelperCategory { Name = name };
+        Db.HelperCategories.Add(category);
+        await Db.SaveChangesAsync();
+
+        _categories.Add(category);
+        _categories = [.. _categories.OrderBy(c => c.Name)];
+        _categoryId = category.Id.ToString();
+        _showNewCategory = false;
+    }
+
+    private void SetIsExternal(ChangeEventArgs e)
+    {
+        _isExternal = (bool)e.Value!;
+        // Model/Prompt/Knowledge/Context/Output tabs are hidden while External - if one of them
+        // was active, fall back to Basics rather than leaving the panel showing a now-unreachable tab.
+        if (_isExternal && _activeTab != EditorTab.Basics)
+        {
+            _activeTab = EditorTab.Basics;
+        }
+    }
+
+    private void RemoveKnowledge()
+    {
+        _knowledgeData = null;
+        _knowledgeFileType = null;
+        _showKnowledgeText = false;
+        _knowledgeText = "";
+    }
+
+    private async Task OnKnowledgeFileSelected(InputFileChangeEventArgs e)
+    {
+        _knowledgeError = null;
+        var file = e.File;
+        if (file is null) return;
+
+        var extension = System.IO.Path.GetExtension(file.Name).TrimStart('.').ToLowerInvariant();
+        if (AttachmentClassifier.ClassifyExtension(extension) is null)
+        {
+            _knowledgeError = $"\"{file.Name}\" isn't a supported document type.";
+            return;
+        }
+
+        if (file.Size > MaxKnowledgeBytes)
+        {
+            _knowledgeError = $"\"{file.Name}\" is too large ({file.Size / 1_000_000.0:0.0} MB) - the limit is {MaxKnowledgeBytes / 1_000_000.0:0.0} MB.";
+            return;
+        }
+
+        try
+        {
+            using var stream = file.OpenReadStream(maxAllowedSize: MaxKnowledgeBytes);
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer);
+            _knowledgeData = Convert.ToBase64String(buffer.ToArray());
+            _knowledgeFileType = extension;
+            _showKnowledgeText = false;
+            _knowledgeText = "";
+        }
+        catch (IOException)
+        {
+            _knowledgeError = $"\"{file.Name}\" is too large - the limit is {MaxKnowledgeBytes / 1_000_000.0:0.0} MB.";
+        }
+    }
+
+    private void ToggleKnowledgeText()
+    {
+        if (!_showKnowledgeText && !string.IsNullOrWhiteSpace(_knowledgeData))
+        {
+            _knowledgeText = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(_knowledgeData));
+        }
+        _showKnowledgeText = !_showKnowledgeText;
+    }
+
+    private void SetKnowledgeText(string text)
+    {
+        _knowledgeText = text;
+        _knowledgeData = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(text));
+    }
+
+    private string KnowledgeDownloadUri() =>
+        $"data:{KnowledgeMimeType()};base64,{_knowledgeData}";
+
+    private string KnowledgeDownloadFileName()
+    {
+        var baseName = string.IsNullOrWhiteSpace(_name) ? "knowledge-document" : _name;
+        var invalid = System.IO.Path.GetInvalidFileNameChars();
+        var cleaned = new string([.. baseName.Select(c => invalid.Contains(c) ? '-' : c)]);
+        return $"{cleaned}.{_knowledgeFileType}";
+    }
+
+    private string KnowledgeMimeType() => _knowledgeFileType switch
+    {
+        "pdf" => "application/pdf",
+        "csv" => "text/csv",
+        "doc" => "application/msword",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xls" => "application/vnd.ms-excel",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "html" or "htm" => "text/html",
+        "txt" => "text/plain",
+        "md" => "text/markdown",
+        "vtt" => "text/vtt",
+        _ => "application/octet-stream"
+    };
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_name)) return;
+
+        _saving = true;
+        _saveError = null;
+
+        var effectiveScope = _isAdmin ? _scope : HelperScope.Personal;
+        var effectiveOwner = effectiveScope == HelperScope.Personal ? (_isAdmin ? _ownerEmail.Trim() : _email) : null;
+
+        HelperDefinition entity;
+        if (Id is { } id)
+        {
+            var existing = await Db.HelperDefinitions
+                .Include(h => h.ContextQuestions)
+                .FirstOrDefaultAsync(h => h.Id == id);
+            if (existing is null)
+            {
+                _saveError = "This Helper no longer exists.";
+                _saving = false;
+                return;
+            }
+            entity = existing;
+        }
+        else
+        {
+            entity = new HelperDefinition { Name = _name.Trim() };
+            Db.HelperDefinitions.Add(entity);
+        }
+
+        entity.Name = _name.Trim();
+        entity.Description = NullIfBlank(_description);
+        entity.Scope = effectiveScope;
+        entity.OwnerEmail = effectiveOwner;
+        entity.HelperCategoryId = ParseIntOrNull(_categoryId);
+
+        entity.IsExternal = _isExternal;
+        entity.ExternalUrl = _isExternal ? NullIfBlank(_externalUrl) : null;
+
+        entity.LlmDefinitionId = _isExternal ? null : ParseIntOrNull(_llmDefinitionId);
+        entity.Effort = !_isExternal && Enum.TryParse<EffortLevel>(_effort, out var effort) ? effort : null;
+
+        entity.PrimaryPurpose = NullIfBlank(_primaryPurpose);
+        entity.Methodology = NullIfBlank(_methodology);
+        entity.StyleTone = NullIfBlank(_styleTone);
+        entity.OutputFormat = NullIfBlank(_outputFormat);
+        entity.TargetAudience = NullIfBlank(_targetAudience);
+        entity.SpecialInstructions = NullIfBlank(_specialInstructions);
+
+        entity.HasKnowledge = _hasKnowledge && !string.IsNullOrWhiteSpace(_knowledgeData);
+        entity.KnowledgeData = entity.HasKnowledge ? _knowledgeData : null;
+        entity.KnowledgeFileType = entity.HasKnowledge ? _knowledgeFileType : null;
+        entity.KnowledgePrompt = entity.HasKnowledge ? NullIfBlank(_knowledgePrompt) : null;
+
+        entity.AllowContext = _allowContext;
+        entity.ContextQuestionsIntro = NullIfBlank(_contextQuestionsIntro);
+
+        // Blank-labelled draft rows (e.g. "+ Add question" clicked but never filled in) are
+        // dropped silently rather than blocking the save with a validation error.
+        var validQuestions = _contextQuestions.Where(q => !string.IsNullOrWhiteSpace(q.Label)).ToList();
+        var keepIds = validQuestions.Where(q => q.Id.HasValue).Select(q => q.Id!.Value).ToHashSet();
+        foreach (var stale in entity.ContextQuestions.Where(q => !keepIds.Contains(q.Id)).ToList())
+        {
+            Db.HelperContextQuestions.Remove(stale);
+        }
+        for (var i = 0; i < validQuestions.Count; i++)
+        {
+            var draft = validQuestions[i];
+            if (draft.Id is { } questionId)
+            {
+                var existingQuestion = entity.ContextQuestions.First(q => q.Id == questionId);
+                existingQuestion.Label = draft.Label.Trim();
+                existingQuestion.Type = draft.Type;
+                existingQuestion.IsMandatory = draft.IsMandatory;
+                existingQuestion.UsageInstruction = NullIfBlank(draft.UsageInstruction);
+                existingQuestion.SortOrder = i;
+            }
+            else
+            {
+                entity.ContextQuestions.Add(new HelperContextQuestion
+                {
+                    Label = draft.Label.Trim(),
+                    Type = draft.Type,
+                    IsMandatory = draft.IsMandatory,
+                    UsageInstruction = NullIfBlank(draft.UsageInstruction),
+                    SortOrder = i
+                });
+            }
+        }
+
+        entity.DefaultStylesheetId = ParseIntOrNull(_stylesheetId);
+        entity.OutputSchemaJson = NullIfBlank(_outputSchemaJson);
+
+        await Db.SaveChangesAsync();
+
+        Nav.NavigateTo($"/helpers/editor/{entity.Id}");
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (Id is not { } id) return;
+
+        var existing = await Db.HelperDefinitions.FirstOrDefaultAsync(h => h.Id == id);
+        if (existing is not null)
+        {
+            Db.HelperDefinitions.Remove(existing);
+            await Db.SaveChangesAsync();
+        }
+
+        Nav.NavigateTo("/helpers/editor");
+    }
+
+    private static string? NullIfBlank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+    private static int? ParseIntOrNull(string s) => int.TryParse(s, out var v) ? v : null;
+}

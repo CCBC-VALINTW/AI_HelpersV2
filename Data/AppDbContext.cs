@@ -18,6 +18,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<SpendCap> SpendCaps => Set<SpendCap>();
     public DbSet<ArticleStoreItem> ArticleStoreItems => Set<ArticleStoreItem>();
     public DbSet<ProviderCredential> ProviderCredentials => Set<ProviderCredential>();
+    public DbSet<HelperFavorite> HelperFavorites => Set<HelperFavorite>();
+    public DbSet<UserRoleInfo> UserRoleInfos => Set<UserRoleInfo>();
+    public DbSet<HelperContextQuestion> HelperContextQuestions => Set<HelperContextQuestion>();
     public DbSet<Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey> DataProtectionKeys => Set<Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -61,6 +64,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(p => p.OwnerEmail).HasMaxLength(256);
             e.Property(p => p.Scope).HasConversion<string>().HasMaxLength(10);
             e.Property(p => p.ContextPrompt).HasMaxLength(2048);
+            e.Property(p => p.ContextQuestionsIntro).HasMaxLength(1024);
             e.Property(p => p.KnowledgeFileType).HasMaxLength(10);
             e.Property(p => p.ExternalUrl).HasMaxLength(512);
 
@@ -82,6 +86,21 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.ToTable(t => t.HasCheckConstraint(
                 "CK_HelperDefinition_ExternalUrl",
                 "([IsExternal] = 0 AND [ExternalUrl] IS NULL) OR ([IsExternal] = 1 AND [ExternalUrl] IS NOT NULL)"));
+        });
+
+        modelBuilder.Entity<HelperContextQuestion>(e =>
+        {
+            e.Property(p => p.Label).HasMaxLength(256).IsRequired();
+            e.Property(p => p.Type).HasConversion<string>().HasMaxLength(10);
+            e.Property(p => p.UsageInstruction).HasMaxLength(1024);
+
+            // Questions belong to their Helper and have no independent meaning - cascade, unlike
+            // AccountingEntry/CallbackEntry/Feedback above which deliberately SetNull to preserve
+            // historical records when a Helper is deleted.
+            e.HasOne(p => p.HelperDefinition)
+                .WithMany(h => h.ContextQuestions)
+                .HasForeignKey(p => p.HelperDefinitionId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<AccountingEntry>(e =>
@@ -128,6 +147,18 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<PersonalityPrompt>(e =>
         {
             e.Property(p => p.Email).HasMaxLength(256).IsRequired();
+            e.Property(p => p.Name).HasMaxLength(128).IsRequired().HasDefaultValue("My personality");
+            // One user can save several named personalities - unique per (Email, Name), not per
+            // Email alone as it was when only one was allowed.
+            e.HasIndex(p => new { p.Email, p.Name }).IsUnique();
+            // At most one default per user, same filtered-unique pattern as ProviderCredential.IsDefault below.
+            e.HasIndex(p => p.Email).IsUnique().HasFilter("[IsDefault] = 1");
+        });
+
+        modelBuilder.Entity<UserRoleInfo>(e =>
+        {
+            e.Property(p => p.Email).HasMaxLength(256).IsRequired();
+            e.Property(p => p.Info).HasMaxLength(2048).IsRequired();
             e.HasIndex(p => p.Email).IsUnique();
         });
 
@@ -152,6 +183,20 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(p => p.CreatedBy).HasMaxLength(256);
             // At most one default credential per provider.
             e.HasIndex(p => p.Provider).IsUnique().HasFilter("[IsDefault] = 1");
+        });
+
+        modelBuilder.Entity<HelperFavorite>(e =>
+        {
+            e.Property(p => p.UserEmail).HasMaxLength(256).IsRequired();
+            // One favourite per user per Helper - toggling is add-if-missing/remove-if-present,
+            // this is the backstop against a race producing duplicates.
+            e.HasIndex(p => new { p.UserEmail, p.HelperDefinitionId }).IsUnique();
+
+            e.HasOne(p => p.HelperDefinition)
+                .WithMany() // HelperDefinition doesn't need a nav collection back to this - never
+                            // navigated from that side, only queried by UserEmail directly.
+                .HasForeignKey(p => p.HelperDefinitionId)
+                .OnDelete(DeleteBehavior.Cascade); // a favourite pointing at a deleted Helper is meaningless.
         });
     }
 }

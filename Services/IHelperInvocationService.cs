@@ -1,11 +1,12 @@
 using AiHelpers.Contracts;
 using AiHelpers.Data.Entities;
+using AiHelpers.Providers;
 
 namespace AiHelpers.Services;
 
 public interface IHelperInvocationService
 {
-    Task<HelperInvocationOutcome> RunAsync(HelperDefinition helper, string userInput, string userEmail, CancellationToken cancellationToken = default);
+    Task<HelperInvocationOutcome> RunAsync(HelperDefinition helper, string userInput, string userEmail, IReadOnlyList<Attachment>? attachments = null, CancellationToken cancellationToken = default);
 }
 
 public class HelperInvocationOutcome

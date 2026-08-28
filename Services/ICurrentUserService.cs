@@ -1,3 +1,5 @@
+using System.Security.Claims;
+
 namespace AiHelpers.Services;
 
 /// <summary>
@@ -10,4 +12,5 @@ public interface ICurrentUserService
     Task<string> GetEmailAsync();
     Task<string> GetDisplayNameAsync();
     Task<bool> IsAdminAsync();
+    Task<ClaimsPrincipal> GetPrincipalAsync();
 }
