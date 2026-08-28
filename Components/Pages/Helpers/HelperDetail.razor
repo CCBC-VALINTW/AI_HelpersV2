@@ -15,6 +15,7 @@
 @inject IOrganisationalInfoService OrgInfo
 @inject IUrlFetchService UrlFetch
 @inject IJSRuntime JS
+@inject NavigationManager Nav
 
 <PageTitle>@(_helper?.Name ?? "Helper")</PageTitle>
 
@@ -129,9 +130,14 @@ else
                 <p class="text-muted mb-0">@((MarkupString)(_helper.Description ?? ""))</p>
             </div>
         </div>
-        <span class="badge @(_helper.Scope == HelperScope.General ? "text-bg-primary" : "text-bg-secondary") fs-6">
-            @_helper.Scope
-        </span>
+        <div class="d-flex flex-column align-items-end gap-2">
+            <span class="badge @(_helper.Scope == HelperScope.General ? "text-bg-primary" : "text-bg-secondary") fs-6">
+                @_helper.Scope
+            </span>
+            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="CloneAsync" disabled="@_cloning">
+                @(_cloning ? "Cloning…" : "Clone as my own")
+            </button>
+        </div>
     </div>
 
     <div class="d-flex flex-wrap align-items-center gap-3 mb-4 p-3 border rounded helper-info-strip">
@@ -527,6 +533,68 @@ else
         await Db.SaveChangesAsync();
     }
 
+    private bool _cloning;
+
+    /// <summary>
+    /// "Use an existing Helper as a base for my own variant" - a full copy of every configured
+    /// field (including a deep copy of ContextQuestions, not shared rows - they cascade-delete
+    /// with their own Helper, so sharing would be invalid anyway), always landing as Personal and
+    /// owned by whoever clicked Clone, regardless of the source Helper's own scope/owner. Works
+    /// for any Helper this page could load in the first place (General, or one already owned by
+    /// this user) - no extra check needed here since that's already enforced by OnInitializedAsync's
+    /// own query. Navigates straight into the editor so the user can start customising immediately.
+    /// </summary>
+    private async Task CloneAsync()
+    {
+        if (_helper is null || _cloning) return;
+        _cloning = true;
+
+        var clone = new Data.Entities.HelperDefinition
+        {
+            Name = $"{_helper.Name} (My copy)",
+            Description = _helper.Description,
+            Scope = HelperScope.Personal,
+            OwnerEmail = _email,
+            HelperCategoryId = _helper.HelperCategoryId,
+            IsExternal = _helper.IsExternal,
+            ExternalUrl = _helper.ExternalUrl,
+            LlmDefinitionId = _helper.LlmDefinitionId,
+            Effort = _helper.Effort,
+            Creativity = _helper.Creativity,
+            Adherence = _helper.Adherence,
+            CreativityAdjustmentAllowance = _helper.CreativityAdjustmentAllowance,
+            AdherenceAdjustmentAllowance = _helper.AdherenceAdjustmentAllowance,
+            PrimaryPurpose = _helper.PrimaryPurpose,
+            Methodology = _helper.Methodology,
+            StyleTone = _helper.StyleTone,
+            OutputFormat = _helper.OutputFormat,
+            TargetAudience = _helper.TargetAudience,
+            SpecialInstructions = _helper.SpecialInstructions,
+            AllowContext = _helper.AllowContext,
+            ContextPrompt = _helper.ContextPrompt,
+            ContextQuestionsIntro = _helper.ContextQuestionsIntro,
+            HasKnowledge = _helper.HasKnowledge,
+            KnowledgeData = _helper.KnowledgeData,
+            KnowledgeFileType = _helper.KnowledgeFileType,
+            KnowledgePrompt = _helper.KnowledgePrompt,
+            DefaultStylesheetId = _helper.DefaultStylesheetId,
+            OutputSchemaJson = _helper.OutputSchemaJson,
+            ContextQuestions = [.. _helper.ContextQuestions.OrderBy(q => q.SortOrder).Select(q => new Data.Entities.HelperContextQuestion
+            {
+                Label = q.Label,
+                Type = q.Type,
+                IsMandatory = q.IsMandatory,
+                UsageInstruction = q.UsageInstruction,
+                SortOrder = q.SortOrder
+            })]
+        };
+
+        Db.HelperDefinitions.Add(clone);
+        await Db.SaveChangesAsync();
+
+        Nav.NavigateTo($"/helpers/editor/{clone.Id}");
+    }
+
     private async Task RunHelper()
     {
         if (_helper is null) return;
@@ -708,40 +776,15 @@ else
         {
             parts.Add($"Personality traits to use to colour the style of your response: {personality.Prompt}");
         }
-        var contextParts = new List<string>();
-        foreach (var answer in _contextAnswers)
+        // Shared with the Helper Editor's preview facility (ContextAnswerFormatter) so the two
+        // can't silently drift on formatting - reinforced again in BedrockAdapter's system prompt
+        // (recency-weighted, see ContextAnswersReinforcement) since these answers can now gate
+        // whether whole sections/features appear at all, not just add background colour.
+        var contextBlock = ContextAnswerFormatter.BuildContextBlock(_contextAnswers.Select(a =>
+            new ContextAnswerFormatter.Answer(a.Question.Label, a.Question.Type, a.Question.UsageInstruction, a.Text, a.Document, a.BoolValue)));
+        if (contextBlock is not null)
         {
-            var instruction = string.IsNullOrWhiteSpace(answer.Question.UsageInstruction) ? null : answer.Question.UsageInstruction;
-
-            if (answer.Question.Type == ContextQuestionType.Text && !string.IsNullOrWhiteSpace(answer.Text))
-            {
-                contextParts.Add(instruction is null
-                    ? $"{answer.Question.Label}: {answer.Text}"
-                    : $"{answer.Question.Label}: {answer.Text} ({instruction})");
-            }
-            else if (answer.Question.Type == ContextQuestionType.Document && answer.Document is not null && instruction is not null)
-            {
-                contextParts.Add($"Regarding the attached document \"{answer.Document.Name}\" ({answer.Question.Label}): {instruction}");
-            }
-            else if (answer.Question.Type == ContextQuestionType.Boolean)
-            {
-                // Always included, unlike Text/Document - "No" is meaningful information too,
-                // there's no "blank" state to skip the way an empty text box has.
-                var value = answer.BoolValue ? "Yes" : "No";
-                contextParts.Add(instruction is null
-                    ? $"{answer.Question.Label}: {value}"
-                    : $"{answer.Question.Label}: {value} ({instruction})");
-            }
-        }
-        if (contextParts.Count > 0)
-        {
-            // Grouped under one header (not one parts[] entry per answer) and placed early, ahead
-            // of baseInput - reinforced again in BedrockAdapter's system prompt (recency-weighted,
-            // see ContextAnswersReinforcement) since these answers can now gate whether whole
-            // sections/features appear at all, not just add background colour to the response.
-            parts.Add("Context answers provided below - read all of these FIRST, before drafting your response, " +
-                "as they may change which sections or features your output should include:\n" +
-                string.Join("\n", contextParts));
+            parts.Add(contextBlock);
         }
         parts.Add(baseInput);
         return string.Join("\n\n", parts);
@@ -1132,55 +1175,15 @@ else
     private string? GetSelectedCss() =>
         _stylesheets.FirstOrDefault(s => s.Id == _selectedStylesheetId)?.Css;
 
-    /// <summary>
-    /// A stylesheet row can exist purely as a placeholder (V1's migrated "No Stylesheet" row is
-    /// literally the empty tag "&lt;style&gt;&lt;/style&gt;") - checked by content, not by name,
-    /// so any other near-empty stylesheet behaves the same way.
-    /// </summary>
-    private static bool HasRealStyling(string? css) =>
-        !string.IsNullOrWhiteSpace(css) &&
-        !string.IsNullOrWhiteSpace(Regex.Replace(css, "</?style[^>]*>", "", RegexOptions.IgnoreCase));
+    // A stylesheet row can exist purely as a placeholder (V1's migrated "No Stylesheet" row is
+    // literally the empty tag "<style></style>") - OutputDocumentBuilder.HasRealStyling checks by
+    // content, not by name, so any other near-empty stylesheet behaves the same way. See
+    // Services/OutputDocumentBuilder.cs for the full rationale (shared with the Helper Editor's
+    // preview facility so the two can't drift on stylesheet handling).
+    private static bool HasRealStyling(string? css) => OutputDocumentBuilder.HasRealStyling(css);
 
-    /// <summary>
-    /// Wraps model output as a standalone HTML document for an iframe. This is genuine
-    /// browser-level isolation, not a convention the model has to cooperate with - unlike V1's
-    /// "wrap everything in a rendDoc div" prompt instruction, a &lt;style&gt; block inside here
-    /// cannot leak out to (or be affected by) the host page, and sandbox="" blocks scripts.
-    ///
-    /// Composes the chosen Stylesheet's CSS at render time, not at invocation time, so switching
-    /// stylesheets never needs to re-run the Helper - matches V1's runtime swap behaviour. When a
-    /// real stylesheet is applied, any &lt;style&gt; block the model embedded itself (from being
-    /// run under "No Stylesheet", where it has free rein) is stripped first so it can't fight the
-    /// chosen stylesheet's rules; under "No Stylesheet" the model's own styling is left intact.
-    ///
-    /// Every migrated V1 stylesheet scopes its rules under a ".rendDoc" wrapper class (V1's
-    /// prompt told the model to wrap its whole response in one) - confirmed against the real
-    /// Stylesheets table, e.g. "General Professional" is entirely ".rendDoc h1", ".rendDoc
-    /// table", etc. V2's model output has no such wrapper, so without adding it here every
-    /// stylesheet's selectors match nothing and picking a different one has no visible effect.
-    /// Added at render time rather than via a prompt instruction, so it applies uniformly
-    /// (including to output produced before this fix, and regardless of what the model does).
-    /// </summary>
-    private static string BuildOutputDocument(string bodyHtml, string? stylesheetCss)
-    {
-        var applyStylesheet = HasRealStyling(stylesheetCss);
-        var body = applyStylesheet ? StripEmbeddedStyles(bodyHtml) : bodyHtml;
-
-        return $$"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-            <meta charset="utf-8" />
-            <style>body { font-family: Calibri, Arial, sans-serif; margin: 1rem; }</style>
-            {{(applyStylesheet ? stylesheetCss : "")}}
-            </head>
-            <body><div class="rendDoc">{{body}}</div></body>
-            </html>
-            """;
-    }
-
-    private static string StripEmbeddedStyles(string html) =>
-        Regex.Replace(html, "<style[^>]*>.*?</style>", "", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+    private static string BuildOutputDocument(string bodyHtml, string? stylesheetCss) =>
+        OutputDocumentBuilder.Build(bodyHtml, stylesheetCss);
 
     /// <summary>
     /// Some Helpers produce full interactive HTML apps (charts, drill-downs, embedded scripts) -
