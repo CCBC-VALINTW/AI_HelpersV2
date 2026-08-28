@@ -31,10 +31,6 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.11" />
     <PackageReference Include="Microsoft.Identity.Web" Version="4.14.2" />
     <PackageReference Include="Microsoft.Identity.Web.UI" Version="4.14.2" />
-    <!-- PDF export - PDFsharp/MigraDoc, MIT licensed, actively maintained (net10.0-targeted builds
-         as of 6.2.4), no revenue threshold or per-seat "community edition" terms unlike QuestPDF
-         (deliberately avoided - see the project's build report for the reasoning). -->
-    <PackageReference Include="PDFsharp-MigraDoc" Version="6.2.4" />
   </ItemGroup>
 
 </Project>

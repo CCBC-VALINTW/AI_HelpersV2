@@ -26,6 +26,17 @@
 // (also confirmed empirically: passing the literal string "null" as a postMessage targetOrigin
 // throws a SyntaxError in Chromium, so '*' is used for both directions here instead).
 //
+// PDF export (see printDocument() below) reuses this exact same live preview via the browser's own
+// print-to-PDF rather than a separate server-side HTML->PDF reconstruction, so what gets exported is
+// genuinely what's on screen. It works the same postMessage way as everything else here for the same
+// reason: `iframe.contentWindow.print()` called from this side throws a SecurityError (`print` isn't
+// among the handful of properties exposed on a cross-origin WindowProxy), so instead a `print`
+// message is posted INTO the frame and its own bootstrap script calls `window.print()` on itself.
+// That also requires `allow-modals` alongside `allow-scripts` in the iframe's sandbox - without it,
+// a sandboxed frame's own window.print() is a silent no-op (confirmed empirically: no exception, no
+// beforeprint/afterprint, no dialog). allow-modals only unlocks modal dialogs (print/alert/confirm/
+// prompt); it does not restore allow-same-origin or weaken the opaque-origin isolation above.
+//
 // Whatever HTML this module hands back to Blazor on Save/getHtml is only ever a body-level
 // fragment (matching GeneratedDocument.HtmlContent's existing convention, and what
 // wwwroot/js/tinymceEditor.js's own getHtml already returns) - never a full <html> document. The
@@ -107,6 +118,32 @@ export async function getHtml(id) {
     }
 }
 
+/// <summary>
+/// Triggers the browser's native print flow against the SAME content already rendered in the live
+/// preview iframe, so PDF export is genuinely WYSIWYG rather than a separately-reconstructed
+/// document (see DocumentExportService.ToDocx/ToHtml, which still use HtmlBlockParser + a renderer
+/// for their own formats - PDF used to as well, via PdfRenderer, until this replaced it).
+///
+/// Posts a `print` message INTO the iframe rather than calling `.print()` on it directly from here.
+/// Both were tried empirically while building this: `state.iframe.contentWindow.print()` throws a
+/// SecurityError in Chromium - `print` is not among the small set of properties (window, close,
+/// closed, focus, blur, postMessage, location, ...) exposed on a cross-origin WindowProxy, so it
+/// doesn't matter that Window.print() itself carries no same-origin requirement in the spec; the
+/// property read to get at it is what's blocked. Posting the message instead lets the framed
+/// document's own bootstrap script (running same-realm inside the frame - see BOOTSTRAP_SOURCE) call
+/// `window.print()` on itself, which is unrestricted. This also requires the iframe's `sandbox` to
+/// include `allow-modals` (see loadDocument) - confirmed empirically that window.print() inside a
+/// sandboxed frame without it is a silent no-op.
+///
+/// Fire-and-forget: no response is awaited (there's nothing to resolve - see the bootstrap's own
+/// `print` case).
+/// </summary>
+export function printDocument(id) {
+    const state = instances.get(id);
+    if (!state || !state.iframe) return;
+    state.iframe.contentWindow.postMessage({ __ns: MSG, type: 'print' }, '*');
+}
+
 export function destroyEditor(id) {
     const state = instances.get(id);
     if (!state) return;
@@ -135,8 +172,14 @@ function loadDocument(state, bodyHtml) {
     const iframe = document.createElement('iframe');
     iframe.className = 'structured-editor-frame';
     iframe.title = 'Document preview - click any text to edit it';
-    // allow-scripts only, deliberately no allow-same-origin - see module header comment.
-    iframe.setAttribute('sandbox', 'allow-scripts');
+    // allow-scripts, deliberately no allow-same-origin - see module header comment. allow-modals is
+    // also required (confirmed empirically - see printDocument()) for the framed document's own
+    // window.print() call to do anything at all: without it, a sandboxed frame silently no-ops the
+    // call (no exception, no beforeprint/afterprint event, no dialog). allow-modals only permits
+    // modal dialogs (alert/confirm/prompt/print) - it does not restore allow-same-origin or grant
+    // any DOM/script access back to this frame, so the opaque-origin isolation this module relies on
+    // is unaffected.
+    iframe.setAttribute('sandbox', 'allow-scripts allow-modals');
     iframe.srcdoc = buildFramedDocument(bodyHtml);
 
     state.panel.previewHost.innerHTML = '';
@@ -151,8 +194,14 @@ function buildFramedDocument(bodyHtml) {
 <meta charset="utf-8">
 <style id="${BOOTSTRAP_STYLE_ID}">
   body { font-family: Calibri, Arial, sans-serif; margin: 1rem; color: #212529; }
-  .${HOVER_CLASS} { outline: 2px solid #7c76b7 !important; outline-offset: 2px !important; background-color: rgba(124, 118, 183, 0.08) !important; cursor: pointer !important; }
-  .${SELECTED_CLASS} { outline: 3px solid #00927e !important; outline-offset: 2px !important; background-color: rgba(0, 146, 126, 0.08) !important; }
+  /* Hover/selection highlighting is this editor's own UI chrome, not part of the document being
+     authored - scoped to screen so printDocument()'s window.print() (and a user's own Ctrl+P
+     inside the frame) never bakes an outline/highlight into the PDF, even if an element happens to
+     still carry HOVER_CLASS/SELECTED_CLASS at print time. */
+  @media screen {
+    .${HOVER_CLASS} { outline: 2px solid #7c76b7 !important; outline-offset: 2px !important; background-color: rgba(124, 118, 183, 0.08) !important; cursor: pointer !important; }
+    .${SELECTED_CLASS} { outline: 3px solid #00927e !important; outline-offset: 2px !important; background-color: rgba(0, 146, 126, 0.08) !important; }
+  }
 </style>
 </head>
 <body>${bodyHtml}
@@ -305,6 +354,12 @@ const BOOTSTRAP_SOURCE = `
       post({ type: 'applied', requestId: data.requestId, ok: ok });
     } else if (data.type === 'getHtml') {
       post({ type: 'html', requestId: data.requestId, html: extractCleanBodyHtml() });
+    } else if (data.type === 'print') {
+      // window.print() here is this frame's OWN window - printing the live preview document
+      // itself, not the parent page. No response is posted back: this call blocks this frame's
+      // script execution until the user dismisses the print UI (confirmed empirically), so there
+      // is nothing to usefully await from the parent side anyway - see printDocument() below.
+      window.print();
     }
   });
 

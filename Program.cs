@@ -150,11 +150,14 @@ app.MapRazorComponents<App>()
 // before its own sign-in logic ever runs - the one place anonymous access is actually correct.
 app.MapControllers().AllowAnonymous();
 
-// Binary file downloads (Word/PDF) for the document editor (Components/Pages/Documents/
+// Word/HTML file downloads for the document editor (Components/Pages/Documents/
 // DocumentEditor.razor) - a plain HTTP GET endpoint rather than a Blazor Server data: URI download
 // link (the pattern HelperDetail.razor uses for its own HTML-only "Download as HTML" button),
-// since a docx/pdf has to be actual binary bytes with the right Content-Type, not something that
-// fits neatly into a data: URI the way small HTML output does. No [AllowAnonymous]/explicit
+// since a docx has to be actual binary bytes with the right Content-Type, not something that fits
+// neatly into a data: URI the way small HTML output does. PDF export doesn't come through here at
+// all any more - see DocumentEditor.razor's PrintAsync/structuredEditor.js's printDocument(), which
+// triggers the browser's own native print-to-PDF against the live preview iframe client-side
+// instead. No [AllowAnonymous]/explicit
 // [Authorize] needed - this endpoint has no authorization metadata of its own, so the global
 // FallbackPolicy above (RequireAuthenticatedUser) applies to it exactly the same as it does to
 // every Razor/MVC page. HttpContext.User - not ICurrentUserService - is used here deliberately:
@@ -192,15 +195,11 @@ app.MapGet("/documents/{id:int}/export/{format}", async (
             exportService.ToDocx(document.Title, document.HtmlContent),
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             $"{fileName}.docx"),
-        "pdf" => Results.File(
-            exportService.ToPdf(document.Title, document.HtmlContent),
-            "application/pdf",
-            $"{fileName}.pdf"),
         "html" => Results.File(
             exportService.ToHtml(document.Title, document.HtmlContent),
             "text/html",
             $"{fileName}.html"),
-        _ => Results.BadRequest("Unsupported export format - expected docx, pdf, or html."),
+        _ => Results.BadRequest("Unsupported export format - expected docx or html."),
     };
 });
 
