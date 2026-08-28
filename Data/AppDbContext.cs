@@ -21,6 +21,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<HelperFavorite> HelperFavorites => Set<HelperFavorite>();
     public DbSet<UserRoleInfo> UserRoleInfos => Set<UserRoleInfo>();
     public DbSet<HelperContextQuestion> HelperContextQuestions => Set<HelperContextQuestion>();
+    public DbSet<GeneratedDocument> GeneratedDocuments => Set<GeneratedDocument>();
     public DbSet<Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey> DataProtectionKeys => Set<Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -197,6 +198,19 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                             // navigated from that side, only queried by UserEmail directly.
                 .HasForeignKey(p => p.HelperDefinitionId)
                 .OnDelete(DeleteBehavior.Cascade); // a favourite pointing at a deleted Helper is meaningless.
+        });
+
+        modelBuilder.Entity<GeneratedDocument>(e =>
+        {
+            e.Property(p => p.CreatedByEmail).HasMaxLength(256).IsRequired();
+            e.Property(p => p.Title).HasMaxLength(256).IsRequired();
+            // Backs the /documents list page's "mine" query - not unique, one user can send several runs.
+            e.HasIndex(p => p.CreatedByEmail);
+
+            e.HasOne(p => p.HelperDefinition)
+                .WithMany() // No nav collection back on HelperDefinition - same reasoning as HelperFavorite above.
+                .HasForeignKey(p => p.HelperDefinitionId)
+                .OnDelete(DeleteBehavior.SetNull); // Preserve the document if its source Helper is later deleted.
         });
     }
 }

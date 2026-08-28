@@ -1,0 +1,63 @@
+@page "/documents"
+@rendermode InteractiveServer
+@using AiHelpers.Data
+@using AiHelpers.Services
+@using Microsoft.EntityFrameworkCore
+@inject AppDbContext Db
+@inject ICurrentUserService CurrentUser
+
+<PageTitle>Documents</PageTitle>
+
+<h1>Documents</h1>
+<p class="text-muted">Documents sent here from a Helper's result for final polish, export, and filing.</p>
+
+@if (_loading)
+{
+    <p><em>Loading…</em></p>
+}
+else if (_documents.Count == 0)
+{
+    <p class="text-muted">No documents yet - open a Helper's result and use "Send to editor" to send one here.</p>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table align-middle">
+            <thead>
+                <tr>
+                    <th>Title</th>
+                    <th>From Helper</th>
+                    <th>Last modified</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var doc in _documents)
+                {
+                    <tr>
+                        <td>@doc.Title</td>
+                        <td class="text-muted">@(doc.HelperDefinition?.Name ?? "—")</td>
+                        <td class="text-muted">@doc.LastModifiedAtUtc.ToLocalTime().ToString("g")</td>
+                        <td class="text-end"><a href="@($"/documents/{doc.Id}")" class="btn btn-outline-primary btn-sm">Open</a></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private List<Data.Entities.GeneratedDocument> _documents = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var email = await CurrentUser.GetEmailAsync();
+        _documents = await Db.GeneratedDocuments
+            .Include(d => d.HelperDefinition)
+            .Where(d => d.CreatedByEmail == email)
+            .OrderByDescending(d => d.LastModifiedAtUtc)
+            .ToListAsync();
+        _loading = false;
+    }
+}

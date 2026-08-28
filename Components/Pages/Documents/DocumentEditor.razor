@@ -1,0 +1,203 @@
+@page "/documents/{Id:int}"
+@rendermode InteractiveServer
+@implements IAsyncDisposable
+@using AiHelpers.Data
+@using AiHelpers.Services
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.JSInterop
+@inject AppDbContext Db
+@inject ICurrentUserService CurrentUser
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+<PageTitle>@(_document?.Title ?? "Document")</PageTitle>
+
+@if (_loading)
+{
+    <p><em>Loading…</em></p>
+}
+else if (_document is null)
+{
+    <h1>Not found</h1>
+    <p class="text-muted">This document doesn't exist, or isn't yours.</p>
+    <a href="/documents" class="btn btn-outline-secondary">Back to Documents</a>
+}
+else
+{
+    <div class="mb-3">
+        <label class="form-label small mb-1" for="docTitle">Title</label>
+        <input id="docTitle" class="form-control form-control-lg" maxlength="256" value="@_title"
+               @oninput="e => _title = e.Value?.ToString() ?? string.Empty" />
+    </div>
+
+    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+        <div class="d-flex align-items-center gap-2">
+            <button type="button" class="btn btn-primary btn-sm" @onclick="SaveAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_title))">
+                @(_busy ? "Saving…" : "Save")
+            </button>
+            @if (_statusMessage is not null)
+            {
+                <span class="text-muted small">@_statusMessage</span>
+            }
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <span class="text-muted small me-1">Export:</span>
+            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => ExportAsync(ExportFormat.Docx)" disabled="@_busy">Word (.docx)</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => ExportAsync(ExportFormat.Pdf)" disabled="@_busy">PDF</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => ExportAsync(ExportFormat.Html)" disabled="@_busy">HTML</button>
+        </div>
+    </div>
+
+    <p class="text-muted small">Exporting saves your latest changes first, then downloads the file.</p>
+
+    <textarea @ref="_editorRef" class="document-editor"></textarea>
+
+    <div class="mt-4">
+        <a href="/documents" class="btn btn-outline-secondary">Back to Documents</a>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    // Key TinyMCE's own editors Map (wwwroot/js/tinymceEditor.js) uses for this page's single
+    // editor instance - distinct from HelperDetail.razor's "input"/"output" ids, though that
+    // wouldn't matter anyway since each page is its own circuit/component instance.
+    private const string EditorId = "document";
+
+    private enum ExportFormat { Docx, Pdf, Html }
+
+    private bool _loading = true;
+    private Data.Entities.GeneratedDocument? _document;
+    private string _title = "";
+    private string _email = "";
+    private bool _busy;
+    private string? _statusMessage;
+    private bool _editorNeedsInit;
+    private ElementReference _editorRef;
+    private IJSObjectReference? _module;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _email = await CurrentUser.GetEmailAsync();
+
+        // Same "doesn't exist" vs "isn't yours" collapse as HelperDetail.razor's own Personal-scope
+        // query - documents are private to whoever sent them here, no sharing/admin override in
+        // this first pass (see the project's build report), so this deliberately doesn't
+        // distinguish the two cases to a caller probing IDs.
+        _document = await Db.GeneratedDocuments
+            .Include(d => d.HelperDefinition)
+            .FirstOrDefaultAsync(d => d.Id == Id && d.CreatedByEmail == _email);
+
+        if (_document is not null)
+        {
+            _title = _document.Title;
+            _editorNeedsInit = true;
+        }
+
+        _loading = false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_editorNeedsInit)
+        {
+            _editorNeedsInit = false;
+            var module = await GetModuleAsync();
+            await module.InvokeVoidAsync("createEditor", EditorId, _editorRef,
+                HtmlContentSanitizer.Sanitize(_document?.HtmlContent ?? ""),
+                "Start writing, or paste in content to polish...",
+                560,
+                new
+                {
+                    menubar = false,
+                    // A fuller toolbar/plugin set than HelperDetail.razor's own in-place editors -
+                    // this is the standalone "final polish" pass (tables, page breaks, alignment,
+                    // search/replace, fullscreen) rather than a quick tweak box. "image" is
+                    // deliberately left out for this first pass - embedding real image bytes into
+                    // the docx/pdf exports needs its own fetch/SSRF-guarded plumbing (the same
+                    // pattern IUrlFetchService already uses) that's out of scope here; leaving the
+                    // toolbar button in without export support would be a silently broken feature,
+                    // not a smaller one.
+                    plugins = "lists table link autolink advlist anchor charmap insertdatetime nonbreaking pagebreak preview quickbars searchreplace visualblocks visualchars wordcount fullscreen help",
+                    toolbar = "undo redo | blocks | bold italic underline strikethrough | forecolor backcolor | align lineheight | bullist numlist outdent indent | link table | pagebreak hr | removeformat | searchreplace | fullscreen preview | help",
+                });
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_document is null || string.IsNullOrWhiteSpace(_title)) return;
+
+        _busy = true;
+        _statusMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var module = await GetModuleAsync();
+            var raw = await module.InvokeAsync<string>("getHtml", EditorId);
+
+            // Re-sanitized here even though it's already-sanitized content being re-edited -
+            // contenteditable can carry arbitrary HTML in from the clipboard on paste, same reason
+            // HelperDetail.razor's ApplyEdits re-sanitizes rather than trusting the editor's schema
+            // alone.
+            _document.Title = _title.Trim();
+            _document.HtmlContent = HtmlContentSanitizer.Sanitize(raw);
+            _document.LastModifiedAtUtc = DateTime.UtcNow;
+            await Db.SaveChangesAsync();
+
+            _title = _document.Title;
+            _statusMessage = $"Saved at {_document.LastModifiedAtUtc.ToLocalTime():HH:mm:ss}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>Always saves first so the download always reflects what's currently in the editor,
+    /// not whatever was last explicitly saved - the export endpoint (Program.cs) reads the
+    /// persisted record, it has no access to this circuit's live TinyMCE content.</summary>
+    private async Task ExportAsync(ExportFormat format)
+    {
+        await SaveAsync();
+        if (_document is null) return;
+
+        var formatSegment = format switch
+        {
+            ExportFormat.Docx => "docx",
+            ExportFormat.Pdf => "pdf",
+            _ => "html",
+        };
+
+        // A real browser navigation (not a SignalR/JS-interop call) so the server can respond with
+        // Content-Disposition: attachment and actual binary bytes - see Program.cs's export
+        // endpoint doc comment for why this isn't a data: URI download link like HelperDetail's
+        // HTML-only one. The browser downloads the file without leaving this page (an attachment
+        // response doesn't unload the current document), so the circuit survives this untouched.
+        Nav.NavigateTo($"/documents/{_document.Id}/export/{formatSegment}", forceLoad: true);
+    }
+
+    private async Task<IJSObjectReference> GetModuleAsync() =>
+        _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "/js/tinymceEditor.js");
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.InvokeVoidAsync("destroyEditor", EditorId);
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit already gone (e.g. browser tab closed) - nothing to clean up. The
+                // ExportAsync forceLoad navigation doesn't reach this: a Content-Disposition:
+                // attachment response triggers a download without the browser unloading the
+                // current page, so the circuit survives it.
+            }
+        }
+    }
+}

@@ -376,6 +376,10 @@ else
 
                     @if (_output is not null)
                     {
+                        <button type="button" class="btn btn-outline-primary btn-sm w-100" @onclick="SendToEditor"
+                                disabled="@(_sendingToEditor || _running || _editing)">
+                            @(_sendingToEditor ? "Sending…" : "Send to editor")
+                        </button>
                         <button type="button" class="btn btn-link btn-sm p-0 text-start" @onclick="StartOver">Start a new run</button>
                     }
                 </div>
@@ -446,6 +450,7 @@ else
     private string _roleInfo = "";
     private List<Data.Entities.PersonalityPrompt> _personalities = [];
     private string _selectedPersonalityId = "";
+    private bool _sendingToEditor;
 
     // AWS doesn't publish exact per-file Converse API limits on its own reference pages - these
     // are conservative, commonly-cited figures, not confirmed exact quotas. If they're off,
@@ -659,6 +664,46 @@ else
         }
 
         await ExecuteAsync();
+    }
+
+    /// <summary>
+    /// The additional "next step" after refining in place (see this page's own build report for
+    /// the scoping decision) - persists the currently-shown _output as a new GeneratedDocument
+    /// record and hands off to the standalone final-polish editor (Components/Pages/Documents/
+    /// DocumentEditor.razor). Deliberately does not touch _output/_lastInput/etc. itself
+    /// afterwards - this page's own refine loop is untouched by sending a copy elsewhere, matching
+    /// the requirement that this be additive, not a replacement for it.
+    /// </summary>
+    private async Task SendToEditor()
+    {
+        if (_helper is null || _output is null) return;
+
+        _sendingToEditor = true;
+        StateHasChanged();
+        try
+        {
+            var document = new Data.Entities.GeneratedDocument
+            {
+                HelperDefinitionId = _helper.Id,
+                CreatedByEmail = _email,
+                Title = _helper.Name,
+                // Sanitized here even though _output already went through HtmlContentSanitizer
+                // whenever it came from ApplyEdits - a fresh (never-edited) run's raw model output
+                // hasn't been sanitized yet at this point, so this is the one place that's not
+                // guaranteed already true for every path that can reach here.
+                HtmlContent = HtmlContentSanitizer.Sanitize(_output),
+                CreatedAtUtc = DateTime.UtcNow,
+                LastModifiedAtUtc = DateTime.UtcNow,
+            };
+            Db.GeneratedDocuments.Add(document);
+            await Db.SaveChangesAsync();
+
+            Nav.NavigateTo($"/documents/{document.Id}");
+        }
+        finally
+        {
+            _sendingToEditor = false;
+        }
     }
 
     private void StartOver()
