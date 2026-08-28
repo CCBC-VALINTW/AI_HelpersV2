@@ -1,0 +1,7 @@
+/* Only visible briefly before TinyMCE initialises and hides the underlying textarea, replacing it
+   with its own UI (.tox-tinymce) that isn't part of this component's CSS-isolation scope - see the
+   identical rule/comment on HelperDetail.razor's .helper-output-editor. */
+.document-editor {
+    display: block;
+    width: 100%;
+}
