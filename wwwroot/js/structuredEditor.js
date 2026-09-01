@@ -44,6 +44,12 @@
 // exactly as it already did for the TinyMCE editor this replaces.
 
 const EDITABLE_SELECTOR = 'h1,h2,h3,h4,h5,h6,p,span,a,li,td,th,label,button,dt,dd,figcaption,caption,blockquote,cite,em,strong,b,i,u,small,sub,sup,summary,legend,option';
+// Selectable but NOT text-editable via the box below - container/structural elements where the
+// meaningful action is deleting the whole thing, not hand-editing their raw markup (a table's
+// internal structure is far too easy to break by editing it as a flat contenteditable blob). A
+// text-less <div> (a pure layout/flex/grid wrapper) is handled separately in findSelectable,
+// since a <div> can go either way depending on whether it happens to have direct text of its own.
+const STRUCTURAL_SELECTOR = 'table,thead,tbody,tfoot,tr,ul,ol,section,article,header,footer,nav,aside,figure,form,fieldset,dl';
 const HOVER_CLASS = 'conwy-editor-highlight';
 const SELECTED_CLASS = 'conwy-editor-selected';
 const BOOTSTRAP_STYLE_ID = 'conwy-editor-injected-style';
@@ -216,6 +222,7 @@ function buildFramedDocument(bodyHtml) {
 const BOOTSTRAP_SOURCE = `
 (function () {
   var EDITABLE_SELECTOR = ${JSON.stringify(EDITABLE_SELECTOR)};
+  var STRUCTURAL_SELECTOR = ${JSON.stringify(STRUCTURAL_SELECTOR)};
   var HOVER_CLASS = ${JSON.stringify(HOVER_CLASS)};
   var SELECTED_CLASS = ${JSON.stringify(SELECTED_CLASS)};
   var MSG = ${JSON.stringify(MSG)};
@@ -224,8 +231,7 @@ const BOOTSTRAP_SOURCE = `
   var selectedElement = null;
   var hoveredElement = null;
 
-  function isQualifyingDiv(el) {
-    if (el.tagName !== 'DIV') return false;
+  function hasDirectText(el) {
     var nodes = el.childNodes;
     for (var i = 0; i < nodes.length; i++) {
       var n = nodes[i];
@@ -234,18 +240,29 @@ const BOOTSTRAP_SOURCE = `
     return false;
   }
 
-  // Walks from the actual event target up to the closest qualifying element. For everything except
-  // DIV this is a simple tag-list match. DIVs only qualify on click when the event's own target IS
-  // the div (mirrors the reference tool's per-element 'e.target === el' guard, so a click on some
-  // non-qualifying nested node - e.g. an icon - inside a text-bearing div doesn't silently select
-  // the whole div); for hover, any div with direct text qualifies as soon as it's reached, same as
-  // the reference tool's div mouseover handler.
-  function findEditable(target, isClick) {
+  // Walks from the actual event target up to the closest selectable element, returning
+  // { el, editable } or null. "editable" marks whether the box below should show its text-editing
+  // toolbar (true - matches EDITABLE_SELECTOR, or a <div> with direct text of its own) or just a
+  // "delete this" option (false - STRUCTURAL_SELECTOR tags, or a <div> with no direct text - a
+  // pure layout/flex/grid wrapper). For everything except DIV this is a simple tag-list match.
+  // DIVs only qualify on click when the event's own target IS the div itself (mirrors the
+  // reference tool's per-element 'e.target === el' guard, so a click on some non-qualifying nested
+  // node - e.g. an icon - inside a div doesn't silently select the whole div, text-bearing or
+  // not); for hover, a div qualifies as soon as it's reached while walking up, same as the
+  // reference tool's div mouseover handler. STRUCTURAL_SELECTOR tags are deliberately NOT given
+  // the same click-target guard as DIV - in practice a click inside e.g. a table almost always
+  // resolves to an inner <td>/<th> (already in EDITABLE_SELECTOR, checked first) long before the
+  // walk ever reaches the <table> itself, so the extra restriction wouldn't meaningfully change
+  // behaviour there and keeping it consistent with EDITABLE_SELECTOR's own unguarded matching is
+  // simpler.
+  function findSelectable(target, isClick) {
     var el = target;
     while (el && el.nodeType === 1) {
-      if (el.matches && el.matches(EDITABLE_SELECTOR)) return el;
-      if (isQualifyingDiv(el)) {
-        if (!isClick || el === target) return el;
+      if (el.matches && el.matches(EDITABLE_SELECTOR)) return { el: el, editable: true };
+      if (el.tagName === 'DIV') {
+        if (!isClick || el === target) return { el: el, editable: hasDirectText(el) };
+      } else if (el.matches && el.matches(STRUCTURAL_SELECTOR)) {
+        return { el: el, editable: false };
       }
       el = el.parentElement;
     }
@@ -260,7 +277,8 @@ const BOOTSTRAP_SOURCE = `
   }
 
   document.addEventListener('mouseover', function (e) {
-    var target = findEditable(e.target, false);
+    var found = findSelectable(e.target, false);
+    var target = found ? found.el : null;
     if (target === hoveredElement) return;
     clearHover();
     if (target && target !== selectedElement) {
@@ -276,11 +294,11 @@ const BOOTSTRAP_SOURCE = `
   });
 
   document.addEventListener('click', function (e) {
-    var target = findEditable(e.target, true);
-    if (!target) return;
+    var found = findSelectable(e.target, true);
+    if (!found) return;
     e.preventDefault();
     e.stopPropagation();
-    selectElement(target);
+    selectElement(found.el, found.editable);
   });
 
   function computePath(el) {
@@ -306,7 +324,7 @@ const BOOTSTRAP_SOURCE = `
     return node;
   }
 
-  function selectElement(el) {
+  function selectElement(el, editable) {
     if (selectedElement) selectedElement.classList.remove(SELECTED_CLASS);
     clearHover();
     selectedElement = el;
@@ -317,6 +335,7 @@ const BOOTSTRAP_SOURCE = `
       path: computePath(el),
       tag: el.tagName.toLowerCase(),
       html: el.innerHTML,
+      editable: editable,
       // Only meaningful when tag is 'a' - lets the panel offer "edit this link's URL" when the
       // SELECTED element is itself a link, not just when a link happens to be nested inside a
       // larger selected block (see insertLink() on the other side of this message).
@@ -371,6 +390,37 @@ const BOOTSTRAP_SOURCE = `
         ok = true;
       }
       post({ type: 'applied', requestId: data.requestId, ok: ok });
+    } else if (data.type === 'delete') {
+      var delTarget = resolvePath(data.path);
+      if (!delTarget || !delTarget.parentElement) {
+        post({ type: 'deleted', requestId: data.requestId, ok: false });
+      } else {
+        var delParent = delTarget.parentElement;
+        // Captured BEFORE removal - enough to reinsert an identical copy at the same position
+        // later (restore doesn't reuse the original node, just its outerHTML - simpler than
+        // trying to keep a detached node reference alive across an arbitrary number of other
+        // edits that might happen before Undo is eventually clicked).
+        var delParentPath = computePath(delParent);
+        var delIndex = Array.prototype.indexOf.call(delParent.children, delTarget);
+        var delOuterHtml = delTarget.outerHTML;
+        if (selectedElement === delTarget) selectedElement = null;
+        delTarget.remove();
+        post({ type: 'deleted', requestId: data.requestId, ok: true, parentPath: delParentPath, index: delIndex, outerHtml: delOuterHtml });
+      }
+    } else if (data.type === 'restore') {
+      var restoreParent = resolvePath(data.parentPath);
+      var restoreOk = false;
+      if (restoreParent) {
+        var refNode = restoreParent.children[data.index] || null;
+        var wrapper = document.createElement('div');
+        wrapper.innerHTML = data.outerHtml;
+        var restoredEl = wrapper.firstElementChild;
+        if (restoredEl) {
+          restoreParent.insertBefore(restoredEl, refNode);
+          restoreOk = true;
+        }
+      }
+      post({ type: 'restored', requestId: data.requestId, ok: restoreOk });
     } else if (data.type === 'getHtml') {
       post({ type: 'html', requestId: data.requestId, html: extractCleanBodyHtml() });
     } else if (data.type === 'print') {
@@ -408,6 +458,8 @@ function handleMessage(id, state, event) {
             break;
         case 'applied':
         case 'html':
+        case 'deleted':
+        case 'restored':
             resolvePending(state, data);
             break;
     }
@@ -462,21 +514,27 @@ function buildPanel(state) {
             </div>
             <div class="structured-editor-edit" data-role="edit" hidden>
                 <div class="structured-editor-selected-tag" data-role="tag"></div>
-                <div class="structured-editor-toolbar" role="toolbar" aria-label="Formatting">
-                    <button type="button" data-cmd="bold" title="Bold"><b>B</b></button>
-                    <button type="button" data-cmd="italic" title="Italic"><i>I</i></button>
-                    <button type="button" data-cmd="underline" title="Underline"><u>U</u></button>
-                    <span class="structured-editor-toolbar-sep"></span>
-                    <button type="button" data-cmd="insertUnorderedList" title="Bullet list">&bull; List</button>
-                    <button type="button" data-cmd="insertOrderedList" title="Numbered list">1. List</button>
-                    <span class="structured-editor-toolbar-sep"></span>
-                    <button type="button" data-action="link" title="Insert link">Link</button>
-                    <button type="button" data-cmd="removeFormat" title="Remove formatting">Clear</button>
+                <div data-role="text-edit-section">
+                    <div class="structured-editor-toolbar" role="toolbar" aria-label="Formatting">
+                        <button type="button" data-cmd="bold" title="Bold"><b>B</b></button>
+                        <button type="button" data-cmd="italic" title="Italic"><i>I</i></button>
+                        <button type="button" data-cmd="underline" title="Underline"><u>U</u></button>
+                        <span class="structured-editor-toolbar-sep"></span>
+                        <button type="button" data-cmd="insertUnorderedList" title="Bullet list">&bull; List</button>
+                        <button type="button" data-cmd="insertOrderedList" title="Numbered list">1. List</button>
+                        <span class="structured-editor-toolbar-sep"></span>
+                        <button type="button" data-action="link" title="Insert link">Link</button>
+                        <button type="button" data-cmd="removeFormat" title="Remove formatting">Clear</button>
+                    </div>
+                    <div class="structured-editor-box" data-role="box" contenteditable="true"></div>
+                    <div class="structured-editor-actions">
+                        <button type="button" class="btn btn-primary btn-sm" data-action="apply">Apply change</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" data-action="revert">Revert</button>
+                    </div>
                 </div>
-                <div class="structured-editor-box" data-role="box" contenteditable="true"></div>
+                <p data-role="structural-hint" class="structured-editor-hint" hidden>This element has no text of its own to edit here - e.g. a table, a list, or a layout container. You can still delete it as a whole below.</p>
                 <div class="structured-editor-actions">
-                    <button type="button" class="btn btn-primary btn-sm" data-action="apply">Apply change</button>
-                    <button type="button" class="btn btn-outline-secondary btn-sm" data-action="revert">Revert</button>
+                    <button type="button" class="btn btn-outline-danger btn-sm" data-action="delete">Delete element</button>
                 </div>
             </div>
             <div class="structured-editor-footer">
@@ -494,6 +552,8 @@ function buildPanel(state) {
         empty: root.querySelector('[data-role="empty"]'),
         edit: root.querySelector('[data-role="edit"]'),
         tag: root.querySelector('[data-role="tag"]'),
+        textEditSection: root.querySelector('[data-role="text-edit-section"]'),
+        structuralHint: root.querySelector('[data-role="structural-hint"]'),
         box: root.querySelector('[data-role="box"]'),
         undoBtn: root.querySelector('[data-action="undo"]'),
         status: root.querySelector('[data-role="status"]'),
@@ -507,6 +567,7 @@ function buildPanel(state) {
     root.querySelector('[data-action="link"]').addEventListener('click', () => insertLink(state));
     root.querySelector('[data-action="apply"]').addEventListener('click', () => applyChange(state));
     root.querySelector('[data-action="revert"]').addEventListener('click', () => revertChange(state));
+    root.querySelector('[data-action="delete"]').addEventListener('click', () => deleteElement(state));
     state.panel.undoBtn.addEventListener('click', () => undoLastChange(state));
 
     state.panel.box.addEventListener('paste', (e) => handlePaste(state, e));
@@ -517,14 +578,24 @@ function onElementSelected(state, data) {
     state.originalHtml = data.html;
     state.selectedTag = data.tag;
     state.selectedHref = data.href;
+    state.selectedEditable = data.editable;
 
     state.panel.empty.hidden = true;
     state.panel.edit.hidden = false;
     state.panel.tag.textContent = `<${data.tag}>`;
-    state.panel.box.innerHTML = data.html;
-    normalizeLists(state.panel.box);
-    state.panel.box.focus();
-    setStatus(state, `Editing <${data.tag}>`);
+    state.panel.textEditSection.hidden = !data.editable;
+    state.panel.structuralHint.hidden = data.editable;
+
+    if (data.editable) {
+        state.panel.box.innerHTML = data.html;
+        normalizeLists(state.panel.box);
+        state.panel.box.focus();
+        setStatus(state, `Editing <${data.tag}>`);
+    } else {
+        // No text-editing surface shown for this one (see textEditSection above) - nothing to
+        // seed into the box, Delete is the only available action.
+        setStatus(state, `Selected <${data.tag}> - no text of its own to edit`);
+    }
 }
 
 function showNoSelection(state) {
@@ -693,7 +764,9 @@ function escapeHtml(str) {
 // ---------------------------------------------------------------------------------------------
 
 async function applyChange(state) {
-    if (!state.selectedPath) return;
+    // The Apply button lives inside textEditSection, hidden entirely for a structural (non-
+    // editable) selection - this guard is defensive backstop only, not the primary gate.
+    if (!state.selectedPath || !state.selectedEditable) return;
 
     normalizeLists(state.panel.box);
     const newHtml = state.panel.box.innerHTML;
@@ -709,7 +782,7 @@ async function applyChange(state) {
         return;
     }
 
-    state.undoStack.push({ path, tag, oldHtml, newHtml });
+    state.undoStack.push({ type: 'edit', path, tag, oldHtml, newHtml });
     updateUndoButton(state);
     state.originalHtml = newHtml;
     setStatus(state, `Change applied to ${tag} (${state.undoStack.length} change${state.undoStack.length === 1 ? '' : 's'} so far)`);
@@ -720,8 +793,43 @@ async function applyChange(state) {
 }
 
 function revertChange(state) {
-    if (!state.selectedPath) return;
+    if (!state.selectedPath || !state.selectedEditable) return;
     state.panel.box.innerHTML = state.originalHtml;
+}
+
+/// <summary>
+/// Removes the whole selected element from the document, not just its content - a genuinely
+/// different operation from Apply (which only ever swaps an element's innerHTML), so it needs its
+/// own 'delete'/'restore' postMessage pair rather than reusing 'apply'. Undoable like everything
+/// else here: the frame captures the element's parent path, sibling index, and full outerHTML
+/// before removing it, enough to reinsert it at exactly the same position later. Confirming first
+/// since, unlike a text edit sitting in the box waiting for Apply, this takes effect immediately.
+/// </summary>
+async function deleteElement(state) {
+    if (!state.selectedPath) return;
+    if (!window.confirm(`Delete this <${state.selectedTag}> element? This can be undone from "Undo last change".`)) return;
+
+    const path = state.selectedPath;
+    const tag = state.selectedTag;
+
+    const result = await requestFromFrame(state, 'delete', { path });
+    if (!result.ok) {
+        setStatus(state, 'Could not delete - the element could not be located.');
+        return;
+    }
+
+    state.undoStack.push({ type: 'delete', tag, parentPath: result.parentPath, index: result.index, outerHtml: result.outerHtml });
+    updateUndoButton(state);
+
+    // Nothing sensible to keep selected - the element the panel was editing no longer exists.
+    state.selectedPath = null;
+    state.selectedTag = null;
+    state.selectedHref = null;
+    state.selectedEditable = null;
+    showNoSelection(state);
+    setStatus(state, `Deleted <${tag}> (${state.undoStack.length} change${state.undoStack.length === 1 ? '' : 's'} so far)`);
+
+    requestFromFrame(state, 'getHtml', {}).catch(() => { /* best-effort cache refresh only */ });
 }
 
 /// <summary>
@@ -735,6 +843,19 @@ async function undoLastChange(state) {
 
     const entry = state.undoStack.pop();
     updateUndoButton(state);
+
+    if (entry.type === 'delete') {
+        const result = await requestFromFrame(state, 'restore', {
+            parentPath: entry.parentPath, index: entry.index, outerHtml: entry.outerHtml,
+        });
+        if (!result.ok) {
+            setStatus(state, 'Could not undo the delete - the original parent could not be located.');
+            return;
+        }
+        setStatus(state, `Restored deleted <${entry.tag}> (${state.undoStack.length} change${state.undoStack.length === 1 ? '' : 's'} remaining)`);
+        requestFromFrame(state, 'getHtml', {}).catch(() => { /* best-effort cache refresh only */ });
+        return;
+    }
 
     const result = await requestFromFrame(state, 'apply', { path: entry.path, html: entry.oldHtml });
     if (!result.ok) {
@@ -835,6 +956,11 @@ function injectSharedStyles() {
 .structured-editor-empty .structured-editor-hint {
     font-size: 0.8rem;
     color: #adb5bd;
+}
+.structured-editor-edit .structured-editor-hint {
+    font-size: 0.82rem;
+    color: #6c757d;
+    margin: 0.3rem 0 0.6rem;
 }
 .structured-editor-selected-tag {
     font-family: Consolas, "Courier New", monospace;
