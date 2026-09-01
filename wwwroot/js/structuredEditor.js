@@ -312,7 +312,16 @@ const BOOTSTRAP_SOURCE = `
     selectedElement = el;
     el.classList.remove(HOVER_CLASS);
     el.classList.add(SELECTED_CLASS);
-    post({ type: 'selected', path: computePath(el), tag: el.tagName.toLowerCase(), html: el.innerHTML });
+    post({
+      type: 'selected',
+      path: computePath(el),
+      tag: el.tagName.toLowerCase(),
+      html: el.innerHTML,
+      // Only meaningful when tag is 'a' - lets the panel offer "edit this link's URL" when the
+      // SELECTED element is itself a link, not just when a link happens to be nested inside a
+      // larger selected block (see insertLink() on the other side of this message).
+      href: el.tagName === 'A' ? el.getAttribute('href') : null,
+    });
   }
 
   function extractCleanBodyHtml() {
@@ -348,7 +357,17 @@ const BOOTSTRAP_SOURCE = `
         // Swapping innerHTML only replaces target's descendants, so the selectedElement
         // reference (and its SELECTED_CLASS) stays valid whether or not target is the
         // currently selected element - no re-selection bookkeeping needed here.
-        target.innerHTML = data.html;
+        if (data.html !== undefined) target.innerHTML = data.html;
+        // attrs is how insertLink() edits the SELECTED element's own href when the selected
+        // element is itself a link - that's an attribute on target, not something expressible
+        // via an innerHTML swap of its contents.
+        if (data.attrs) {
+          for (var attrName in data.attrs) {
+            var attrValue = data.attrs[attrName];
+            if (attrValue === null) target.removeAttribute(attrName);
+            else target.setAttribute(attrName, attrValue);
+          }
+        }
         ok = true;
       }
       post({ type: 'applied', requestId: data.requestId, ok: ok });
@@ -496,6 +515,8 @@ function buildPanel(state) {
 function onElementSelected(state, data) {
     state.selectedPath = data.path;
     state.originalHtml = data.html;
+    state.selectedTag = data.tag;
+    state.selectedHref = data.href;
 
     state.panel.empty.hidden = true;
     state.panel.edit.hidden = false;
@@ -537,10 +558,67 @@ function normalizeLists(container) {
     });
 }
 
+// document.execCommand('createLink', ...) always wraps a NEW <a> around the selection - it never
+// edits an existing one, even when the selection/cursor is already inside a link. Confirmed
+// empirically: using it on already-linked text nests a second <a> inside the first rather than
+// changing the original's href, which is why editing an existing link never worked as expected.
+// Detecting the enclosing <a> first and setting its href directly sidesteps execCommand entirely
+// for that case, rather than trying to work around its behaviour after the fact.
+function findAncestorLink(node, boundary) {
+    while (node && node !== boundary) {
+        if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'A') return node;
+        node = node.parentNode;
+    }
+    return null;
+}
+
+// Two distinct "editing an existing link" cases, confirmed empirically to both occur in practice
+// (not just theoretically): (1) a link nested INSIDE a larger selected block - e.g. a <p> with
+// some linked text among plain text - where the cursor/selection sits inside the <a> within the
+// edit box's own content; and (2) the SELECTED element itself IS the link (the user clicked
+// directly on a link, which qualifies as its own selectable element same as a <p> or <li> would).
+// Case 2 needed real diagnosis: the edit box only ever holds the selected element's INNER content
+// (el.innerHTML, never el itself), so a link selected this way has no <a> ancestor anywhere
+// inside the box at all - case 1's DOM search correctly finds nothing, because there's genuinely
+// nothing to find there. The href being edited in that case lives on the selected element itself,
+// which is why it needs its own path via the 'apply' message's `attrs`, not a change to the box's
+// innerHTML that a later "Apply change" click would pick up.
 function insertLink(state) {
+    // Read the selection BEFORE focus() - calling focus() on an element that doesn't already have
+    // true DOM focus can reset the cursor to a default position in some browsers, which would make
+    // this look at the wrong place regardless of where the user actually clicked.
+    const selection = window.getSelection();
+    const nestedLink = selection && selection.rangeCount > 0
+        ? findAncestorLink(selection.getRangeAt(0).commonAncestorContainer, state.panel.box)
+        : null;
     state.panel.box.focus();
+
+    if (nestedLink) {
+        const url = window.prompt('Edit the URL for this link:', nestedLink.getAttribute('href') || '');
+        if (url) nestedLink.setAttribute('href', url);
+        return;
+    }
+
+    if (state.selectedTag === 'a') {
+        editSelectedElementLink(state);
+        return;
+    }
+
     const url = window.prompt('Enter the URL for this link:', 'https://');
     if (url) document.execCommand('createLink', false, url);
+}
+
+async function editSelectedElementLink(state) {
+    const url = window.prompt('Edit the URL for this link:', state.selectedHref || '');
+    if (!url || url === state.selectedHref) return;
+
+    const result = await requestFromFrame(state, 'apply', { path: state.selectedPath, attrs: { href: url } });
+    if (!result.ok) {
+        setStatus(state, 'Could not update the link - the element could not be located.');
+        return;
+    }
+    state.selectedHref = url;
+    setStatus(state, 'Link URL updated.');
 }
 
 // ---------------------------------------------------------------------------------------------
