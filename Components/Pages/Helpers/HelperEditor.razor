@@ -996,6 +996,12 @@ else
 
         await Db.SaveChangesAsync();
 
+        // Editing an existing Helper navigates to the SAME url it's already on (Id unchanged) -
+        // Blazor doesn't remount the component for a same-url navigation, so nothing else resets
+        // _saving back to false and the button was stuck reading "Saving..." forever. Saving a
+        // brand-new Helper DOES navigate to a genuinely different url (no Id -> a real one) and
+        // remounts fresh anyway, so resetting it here is harmless for that case too.
+        _saving = false;
         Nav.NavigateTo($"/helpers/editor/{entity.Id}");
     }
 

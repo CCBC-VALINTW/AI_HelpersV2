@@ -4,9 +4,10 @@
 // no real authentication yet, so a credential-entry web form would be reachable by anyone.
 //
 // Usage:
-//   dotnet run -- --target "<connection string>" --provider AwsBedrock --created-by "<email>"
-//   dotnet run -- --target "<connection string>" --provider AwsBedrock --verify
+//   dotnet run -- --target "<connection string>" --cert-thumbprint "<thumbprint>" --provider AwsBedrock --created-by "<email>"
+//   dotnet run -- --target "<connection string>" --cert-thumbprint "<thumbprint>" --provider AwsBedrock --verify
 
+using System.Security.Cryptography.X509Certificates;
 using AiHelpers.Data;
 using AiHelpers.Data.Enums;
 using AiHelpers.Providers;
@@ -23,13 +24,12 @@ var services = new ServiceCollection();
 services.AddDbContext<AppDbContext>(o => o.UseSqlServer(options.Value.TargetConnectionString));
 
 // Must match Program.cs in the main app exactly (same PersistKeysToDbContext target, same
-// DPAPI scope, same application name) or credentials encrypted here won't decrypt there.
-#pragma warning disable CA1416
+// certificate, same application name) or credentials encrypted here won't decrypt there. See
+// that file's own comment for why this is certificate-protected rather than DPAPI.
 services.AddDataProtection()
     .PersistKeysToDbContext<AppDbContext>()
-    .ProtectKeysWithDpapi(protectToLocalMachine: true)
+    .ProtectKeysWithCertificate(options.Value.CertThumbprint)
     .SetApplicationName("AiHelpers");
-#pragma warning restore CA1416
 
 services.AddScoped<ICredentialStore, CredentialStore>();
 
@@ -155,9 +155,9 @@ static string ReadMasked(string prompt)
     return value.ToString();
 }
 
-static (string TargetConnectionString, LlmProvider Provider, string? CreatedBy, bool Verify)? ParseArgs(string[] args)
+static (string TargetConnectionString, string CertThumbprint, LlmProvider Provider, string? CreatedBy, bool Verify)? ParseArgs(string[] args)
 {
-    string? targetConn = null, providerName = null, createdBy = null;
+    string? targetConn = null, certThumbprint = null, providerName = null, createdBy = null;
     var verify = false;
 
     for (var i = 0; i < args.Length; i++)
@@ -166,6 +166,9 @@ static (string TargetConnectionString, LlmProvider Provider, string? CreatedBy, 
         {
             case "--target" when i + 1 < args.Length:
                 targetConn = args[++i];
+                break;
+            case "--cert-thumbprint" when i + 1 < args.Length:
+                certThumbprint = args[++i];
                 break;
             case "--provider" when i + 1 < args.Length:
                 providerName = args[++i];
@@ -179,12 +182,12 @@ static (string TargetConnectionString, LlmProvider Provider, string? CreatedBy, 
         }
     }
 
-    if (targetConn is null || providerName is null || (!verify && createdBy is null) || !Enum.TryParse<LlmProvider>(providerName, out var provider))
+    if (targetConn is null || certThumbprint is null || providerName is null || (!verify && createdBy is null) || !Enum.TryParse<LlmProvider>(providerName, out var provider))
     {
-        Console.Error.WriteLine("Usage: dotnet run -- --target \"<connection string>\" --provider AwsBedrock --created-by \"<email>\"");
-        Console.Error.WriteLine("       dotnet run -- --target \"<connection string>\" --provider AwsBedrock --verify");
+        Console.Error.WriteLine("Usage: dotnet run -- --target \"<connection string>\" --cert-thumbprint \"<thumbprint>\" --provider AwsBedrock --created-by \"<email>\"");
+        Console.Error.WriteLine("       dotnet run -- --target \"<connection string>\" --cert-thumbprint \"<thumbprint>\" --provider AwsBedrock --verify");
         return null;
     }
 
-    return (targetConn, provider, createdBy, verify);
+    return (targetConn, certThumbprint, provider, createdBy, verify);
 }

@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Security.Cryptography.X509Certificates;
 using AiHelpers.Components;
 using AiHelpers.Data;
 using AiHelpers.Providers;
@@ -75,16 +76,46 @@ builder.Services.AddScoped<AppDbContext>(sp =>
 // Encrypted at rest via ASP.NET Core Data Protection; key ring lives in AI_Helpers so it's
 // shared between this app and Tools/CredentialManager. PersistKeysToDbContext does NOT get
 // automatic at-rest protection the way the default filesystem repository does on Windows - it
-// must be requested explicitly, or keys are stored unencrypted. DPAPI machine-scope is right
-// for a single on-prem server; if this ever runs across multiple servers, switch to
-// ProtectKeysWithCertificate instead, since DPAPI machine keys don't roam.
-// This app is only ever deployed to Windows Server (Conwy's on-prem infrastructure).
-#pragma warning disable CA1416
+// must be requested explicitly, or keys are stored unencrypted.
+//
+// Certificate-protected, not DPAPI - this app genuinely runs across multiple machines now (Will's
+// local dev box plus at least one deployed server), and DPAPI's machine-scoped keys don't roam
+// between them. That's not hypothetical: a credential saved from one machine became undecryptable
+// on another the first time this actually happened. Every machine that needs to decrypt
+// (including local dev) must have the SAME certificate imported into its own LocalMachine\My
+// store, private key included - see docs/DEPLOYMENT.md for generation/distribution steps.
+// Deliberately no DPAPI fallback if the thumbprint isn't configured - failing loudly on a
+// missing/misconfigured cert beats silently reverting to the per-machine mode this exists to
+// get away from. Must stay in sync with Tools/CredentialManager's own Data Protection setup
+// (same PersistKeysToDbContext target, same certificate, same application name) or credentials
+// encrypted by one won't decrypt in the other.
+var dataProtectionCertThumbprint = builder.Configuration["DataProtection:CertificateThumbprint"];
+if (string.IsNullOrWhiteSpace(dataProtectionCertThumbprint) || dataProtectionCertThumbprint == "CHANGE_ME")
+{
+    throw new InvalidOperationException(
+        "DataProtection:CertificateThumbprint is not configured - see docs/DEPLOYMENT.md for how to generate and install the shared certificate.");
+}
+// The string-thumbprint overload of ProtectKeysWithCertificate uses its own built-in resolver,
+// which failed to find a certificate confirmed (via Get-ChildItem) to genuinely be sitting in
+// LocalMachine\My, readable from a normal non-elevated session - not worth relying on undocumented
+// default store-search behaviour. Looking it up explicitly from the exact store instead removes
+// the ambiguity entirely.
+X509Certificate2 dataProtectionCert;
+using (var certStore = new X509Store(StoreName.My, StoreLocation.LocalMachine))
+{
+    certStore.Open(OpenFlags.ReadOnly);
+    var found = certStore.Certificates.Find(X509FindType.FindByThumbprint, dataProtectionCertThumbprint, validOnly: false);
+    if (found.Count == 0)
+    {
+        throw new InvalidOperationException(
+            $"Certificate with thumbprint {dataProtectionCertThumbprint} was not found in LocalMachine\\My - see docs/DEPLOYMENT.md.");
+    }
+    dataProtectionCert = found[0];
+}
 builder.Services.AddDataProtection()
     .PersistKeysToDbContext<AppDbContext>()
-    .ProtectKeysWithDpapi(protectToLocalMachine: true)
+    .ProtectKeysWithCertificate(dataProtectionCert)
     .SetApplicationName("AiHelpers");
-#pragma warning restore CA1416
 
 builder.Services.AddScoped<ICurrentUserService, EntraCurrentUserService>();
 builder.Services.AddScoped<ICredentialStore, CredentialStore>();

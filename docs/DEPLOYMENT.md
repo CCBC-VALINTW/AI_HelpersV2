@@ -7,7 +7,7 @@ are found — don't let it go stale.
 ## Prerequisites on the target server
 
 This app is only ever deployed to **Windows Server** (the Data Protection setup below assumes
-it — see [DPAPI note](#data-protection--credential-encryption)).
+it — see [Data Protection note](#data-protection--credential-encryption)).
 
 - [ ] **.NET 10 Hosting Bundle** installed — not just the SDK or runtime. Search "hosting bundle"
       on the .NET download page; it's a separate installer bundling the IIS integration
@@ -132,41 +132,81 @@ Add-WebConfigurationProperty -PSPath "MACHINE/WEBROOT/APPHOST" -Filter $filter -
 ## Data Protection / credential encryption
 
 Data Protection keys (which encrypt `ProviderCredential` rows — the Bedrock credential) are
-persisted to the shared DB but DPAPI-protected **machine-scoped**
-(`ProtectKeysWithDpapi(protectToLocalMachine: true)` in `Program.cs` — deliberate choice, see the
-comment there: *"if this ever runs across multiple servers, switch to ProtectKeysWithCertificate
-instead, since DPAPI machine keys don't roam"*).
+persisted to the shared DB and **certificate-protected** (`ProtectKeysWithCertificate` in
+`Program.cs`). This used to be DPAPI machine-scoped, which seemed right for "one on-prem server"
+but broke the moment a second machine (local dev) needed to decrypt the same row — a credential
+saved from one machine became silently unreadable from another, and whoever saved last won,
+breaking whichever machine wasn't currently "it". Certificate-based protection fixes this
+properly: every machine with the same certificate installed shares one key ring, so any of them
+can decrypt what any other one wrote.
 
-**Practical consequence**: a credential encrypted on one machine will NOT decrypt on another. On
-every new server:
+**Every machine that runs this app — local dev included, not just deployed servers — needs the
+same certificate imported**, private key included, into its own `LocalMachine\My` store:
 
-- [ ] Sign in as admin → `/admin/credentials` → re-enter the AWS Bedrock bearer token. Don't
-      expect the existing encrypted value to just work — it won't, and the failure mode is a
-      `CryptographicException`, not a helpful error.
+1. Generate it once (Admin PowerShell, on whichever machine you generate it from):
+   ```powershell
+   $cert = New-SelfSignedCertificate `
+       -Subject "CN=AiHelpers Data Protection" `
+       -CertStoreLocation "Cert:\LocalMachine\My" `
+       -KeyExportPolicy Exportable -KeySpec Signature -KeyLength 2048 `
+       -KeyAlgorithm RSA -HashAlgorithm SHA256 `
+       -NotAfter (Get-Date).AddYears(5)
+   $cert.Thumbprint
+   ```
+2. Export it (with the private key) for distribution to every other machine:
+   ```powershell
+   $pw = Read-Host -AsSecureString -Prompt "Set a password to protect the exported .pfx"
+   Export-PfxCertificate -Cert $cert -FilePath "$env:TEMP\aihelpers-dataprotection.pfx" -Password $pw
+   ```
+   Move the `.pfx` to each other machine some secure way (RDP file transfer, a secure share —
+   never email/chat).
+3. Import it on every other machine (Admin PowerShell there too):
+   ```powershell
+   $pw = Read-Host -AsSecureString -Prompt "Enter the .pfx password"
+   Import-PfxCertificate -FilePath "<path to the .pfx>" -CertStoreLocation "Cert:\LocalMachine\My" -Password $pw
+   ```
+4. **On a deployed server specifically**, being in the store isn't enough — the app pool identity
+   needs read access to the private key. `certlm.msc` → Personal → Certificates → the cert →
+   right-click → All Tasks → **Manage Private Keys** → add `IIS AppPool\<pool name>` with Read.
+   Skip this on local dev (you already have access to a cert you imported yourself).
+5. Set `DataProtection:CertificateThumbprint` to the thumbprint from step 1 — this value is the
+   SAME on every machine (it's the same certificate), and it's not secret, so it lives directly in
+   the committed `appsettings.json`, not per-environment config.
+6. `Tools/CredentialManager` needs the same thumbprint too, passed as `--cert-thumbprint` — its
+   own Data Protection setup has to stay byte-for-byte in sync with the main app's or ciphertext
+   from one won't decrypt in the other.
 
-**Noisy but harmless**: on startup you may see a wall of `fail:`/`warn:` log lines from
-`Microsoft.AspNetCore.DataProtection.*` about keys being "ineligible" and failing to decrypt,
-followed by an `INSERT INTO [DataProtectionKeys]`. This is expected, not a crash - the
-`DataProtectionKeys` table is shared across every machine that's ever pointed at this DB (dev
-boxes, scratch test boots, every VM), each with its own machine-scoped key. A machine correctly
-can't decrypt another machine's key, logs that loudly, then mints and inserts a fresh one for
-itself. Only worth investigating further if the app actually fails to start/respond afterward -
-check that specifically before assuming this log block itself is the problem.
-      **Confirmed hit exactly as predicted on the first deployment** — running a Helper failed
-      with "Error occurred during a cryptographic operation" shown in the run page's Options pane
-      (the app itself worked fine up to that point - sign-in and the Graph org-info pre-fill both
-      succeeded).
-      **Real bug found trying to apply the fix**: `/admin/credentials` itself threw the same
-      `CryptographicException` on load (it decrypts the existing credential just to show a masked
-      "currently set: ****1234" preview) — meaning the page you need to fix this couldn't be
-      reached at all. Fixed in `Components/Pages/Admin/Credentials.razor` — the decrypt-for-preview
-      call is now wrapped in a try/catch, falling back to a warning banner instead of crashing the
-      page, so the save form always renders and a fresh credential can always be entered regardless
-      of whether the existing one is readable on this machine. **Needs a redeploy to take effect**
-      (chose to wait for the proper fix over a DB-side stopgap - see git history if a future
-      deployment wants the immediate-unblock option instead: delete the stale `ProviderCredentials`
-      row and the *unfixed* code already handles a missing row fine, since `GetDefaultAsync` only
-      throws when a row exists but can't be decrypted, not when there's no row at all).
+**Real bug hit setting this up, worth knowing about**: `ProtectKeysWithCertificate(string
+thumbprint)` — the simple string-overload — failed to find a certificate that `Get-ChildItem
+Cert:\LocalMachine\My` independently confirmed was genuinely present and readable from a normal,
+non-elevated session (i.e. not a permissions issue). Root cause not fully pinned down (some
+limitation in the overload's own default certificate-store search, not documented clearly enough
+to state with confidence) — worked around rather than chased further: `Program.cs` and
+`Tools/CredentialManager/Program.cs` both now look the certificate up explicitly via
+`X509Store(StoreName.My, StoreLocation.LocalMachine)` and hand the resolved `X509Certificate2`
+object straight to `ProtectKeysWithCertificate`, bypassing the string-overload's resolver
+entirely. If a future .NET upgrade changes this, the explicit lookup is the more robust pattern
+to keep regardless.
+
+**Every existing `GeneratedDocument`/`ProviderCredential` row encrypted under the old DPAPI setup
+needs re-saving once, from any machine, after this switch** — a brand new key ring means old
+ciphertext genuinely can't decrypt anymore, same "re-enter it" step as before, just a one-time
+transition rather than an ongoing per-machine tax:
+
+- [ ] Sign in as admin → `/admin/credentials` → re-enter the AWS Bedrock bearer token.
+
+**Noisy but harmless, one-time**: on the first boot after switching, you may still see a
+`fail:`/`warn:` block from `Microsoft.AspNetCore.DataProtection.*` about an old DPAPI-protected
+key being "ineligible", followed by a fresh certificate-protected key being minted. Expected for
+that one transition, not an ongoing thing now that every machine shares the same cert.
+
+**A real, separate bug found trying to re-enter the credential, fixed along the way**:
+`/admin/credentials` itself threw a `CryptographicException` on load (it decrypts the existing
+credential just to show a masked "currently set: ****1234" preview) — meaning the page you need
+to fix a stale credential couldn't be reached at all. Fixed in `Components/Pages/Admin/Credentials.razor`
+— the decrypt-for-preview call is wrapped in a try/catch, falling back to a warning banner instead
+of crashing the page, so the save form always renders regardless of whether the existing
+credential is readable.
 
 ## First run / smoke test
 
