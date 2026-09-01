@@ -53,7 +53,11 @@ else
 
     <div @ref="_editorRef" class="structured-editor-container"></div>
 
-    <div class="mt-4">
+    <div class="mt-4 d-flex gap-2">
+        @if (_document.HelperDefinition is not null)
+        {
+            <a href="@($"/helpers/{_document.HelperDefinition.Id}")" class="btn btn-outline-secondary">← Back to @_document.HelperDefinition.Name</a>
+        }
         <a href="/documents" class="btn btn-outline-secondary">Back to Documents</a>
     </div>
 }

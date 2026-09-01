@@ -687,10 +687,8 @@ else
                 HelperDefinitionId = _helper.Id,
                 CreatedByEmail = _email,
                 Title = _helper.Name,
-                // Sanitized here even though _output already went through HtmlContentSanitizer
-                // whenever it came from ApplyEdits - a fresh (never-edited) run's raw model output
-                // hasn't been sanitized yet at this point, so this is the one place that's not
-                // guaranteed already true for every path that can reach here.
+                // Deliberately NOT sanitized - the structured editor preserves the original
+                // document's styling/interactivity verbatim by design, see its own comments.
                 HtmlContent = _output,
                 CreatedAtUtc = DateTime.UtcNow,
                 LastModifiedAtUtc = DateTime.UtcNow,
@@ -698,7 +696,11 @@ else
             Db.GeneratedDocuments.Add(document);
             await Db.SaveChangesAsync();
 
-            Nav.NavigateTo($"/documents/{document.Id}");
+            // Opens in a new tab rather than navigating this one away - the whole point is that
+            // this page's own state (the run's output, refine history, any options set) stays
+            // exactly as it was, so there's actually nothing to "get back to" in the first place
+            // rather than relying on a Back link to a page that would otherwise reload blank.
+            await JS.InvokeVoidAsync("open", $"/documents/{document.Id}", "_blank");
         }
         finally
         {
