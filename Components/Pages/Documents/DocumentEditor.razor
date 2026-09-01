@@ -43,12 +43,12 @@ else
         <div class="d-flex align-items-center gap-2">
             <span class="text-muted small me-1">Export:</span>
             <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => ExportAsync(ExportFormat.Docx)" disabled="@_busy">Word (.docx)</button>
-            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => ExportAsync(ExportFormat.Pdf)" disabled="@_busy">PDF</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="PrintAsync" disabled="@_busy">PDF</button>
             <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => ExportAsync(ExportFormat.Html)" disabled="@_busy">HTML</button>
         </div>
     </div>
 
-    <p class="text-muted small">Exporting saves your latest changes first, then downloads the file.</p>
+    <p class="text-muted small">Word and HTML export save your latest changes first, then download the file. PDF saves first, then opens your browser's print dialog on the live preview itself - choose "Save as PDF" (or your PDF printer) as the destination.</p>
     <p class="text-muted small">Click any piece of text in the preview to edit just that element - the rest of the document's layout is left alone.</p>
 
     <div @ref="_editorRef" class="structured-editor-container"></div>
@@ -66,7 +66,10 @@ else
     // matter anyway since each page is its own circuit/component instance.
     private const string EditorId = "document";
 
-    private enum ExportFormat { Docx, Pdf, Html }
+    // Pdf deliberately isn't a member here any more - PDF export no longer goes through this
+    // server-round-trip export path at all (see PrintAsync), so there is nothing left to switch on
+    // for it.
+    private enum ExportFormat { Docx, Html }
 
     private bool _loading = true;
     private Data.Entities.GeneratedDocument? _document;
@@ -155,7 +158,6 @@ else
         var formatSegment = format switch
         {
             ExportFormat.Docx => "docx",
-            ExportFormat.Pdf => "pdf",
             _ => "html",
         };
 
@@ -165,6 +167,23 @@ else
         // HTML-only one. The browser downloads the file without leaving this page (an attachment
         // response doesn't unload the current document), so the circuit survives this untouched.
         Nav.NavigateTo($"/documents/{_document.Id}/export/{formatSegment}", forceLoad: true);
+    }
+
+    /// <summary>PDF's export button - unlike ExportAsync's server round trip for Word/HTML, this
+    /// stays entirely client-side: save first (same reasoning as ExportAsync's own doc comment - the
+    /// export should reflect what's currently in the editor), then ask the SAME live preview iframe
+    /// the user has been looking at to print itself via the browser's native print-to-PDF. This
+    /// replaces the old PdfRenderer/PDFsharp-MigraDoc pipeline, which had to reconstruct the
+    /// document as PDF primitives from a parsed Block model and couldn't represent real CSS - genuine
+    /// browser print-to-PDF is WYSIWYG by construction instead. See structuredEditor.js's
+    /// printDocument() doc comment for exactly how the trigger reaches the sandboxed iframe.</summary>
+    private async Task PrintAsync()
+    {
+        await SaveAsync();
+        if (_document is null) return;
+
+        var module = await GetModuleAsync();
+        await module.InvokeVoidAsync("printDocument", EditorId);
     }
 
     private async Task<IJSObjectReference> GetModuleAsync() =>
