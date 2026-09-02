@@ -148,11 +148,30 @@ same certificate imported**, private key included, into its own `LocalMachine\My
    $cert = New-SelfSignedCertificate `
        -Subject "CN=AiHelpers Data Protection" `
        -CertStoreLocation "Cert:\LocalMachine\My" `
-       -KeyExportPolicy Exportable -KeySpec Signature -KeyLength 2048 `
+       -KeyExportPolicy Exportable -KeyLength 2048 `
        -KeyAlgorithm RSA -HashAlgorithm SHA256 `
+       -Provider "Microsoft Software Key Storage Provider" `
        -NotAfter (Get-Date).AddYears(5)
    $cert.Thumbprint
    ```
+   **Do NOT add `-KeySpec Signature`** - real incident, 2026-09-01: an earlier version of this
+   command had it, which is a legacy-CAPI-only concept (meaningless for modern CNG providers) and
+   its mere presence nudges `New-SelfSignedCertificate` into generating a legacy-CAPI-backed key by
+   default instead of a real CNG one, even with no `-Provider` specified at all. That produced a
+   cert whose private key lived under the legacy `%ProgramData%\Microsoft\Crypto\RSA\MachineKeys\`
+   path rather than modern CNG storage - and legacy CAPI machine keys can silently end up as
+   *multiple independent physical key blob files* sharing the same logical container name, each
+   with its own separate ACL, materialized differently depending on which process/security context
+   touches them. The practical symptom: a private-key permission grant done via `certlm.msc` →
+   Manage Private Keys would appear to work, then mysteriously stop working again later for no
+   apparent reason - not GPO, not corruption, just legacy CAPI creating a *different* key file than
+   the one that was actually granted access. Confirmed directly (not guessed) by locating the
+   underlying key files in that legacy folder and finding four of them sharing one container name,
+   three inaccessible even to an account that should have had access, one freshly-touched and
+   readable. The `-Provider "Microsoft Software Key Storage Provider"` flag above forces genuine
+   CNG and avoids this whole failure class. If `New-SelfSignedCertificate` throws `Provider type
+   not defined (NTE_PROV_TYPE_NOT_DEF)`, that's `-KeySpec` and `-Provider` being specified together
+   contradicting each other - drop `-KeySpec` entirely, don't add it back.
 2. Export it (with the private key) for distribution to every other machine:
    ```powershell
    $pw = Read-Host -AsSecureString -Prompt "Set a password to protect the exported .pfx"
@@ -165,10 +184,18 @@ same certificate imported**, private key included, into its own `LocalMachine\My
    $pw = Read-Host -AsSecureString -Prompt "Enter the .pfx password"
    Import-PfxCertificate -FilePath "<path to the .pfx>" -CertStoreLocation "Cert:\LocalMachine\My" -Password $pw
    ```
-4. **On a deployed server specifically**, being in the store isn't enough — the app pool identity
-   needs read access to the private key. `certlm.msc` → Personal → Certificates → the cert →
-   right-click → All Tasks → **Manage Private Keys** → add `IIS AppPool\<pool name>` with Read.
-   Skip this on local dev (you already have access to a cert you imported yourself).
+4. Being in the store isn't enough — whichever identity actually **runs** the app needs explicit
+   read access to the private key, separately from whichever identity generated/imported it.
+   `certlm.msc` → Personal → Certificates → the cert → right-click → All Tasks →
+   **Manage Private Keys** → add that identity with Read. On a deployed server that's
+   `IIS AppPool\<pool name>`. **On local dev, do NOT assume this is unnecessary** - real incident,
+   2026-09-01: the cert was generated/imported under an elevated admin account
+   (`CORPDOM\<name>_la`-style), which got automatic private-key access, but the app itself runs
+   under the plain everyday account - `Keyset does not exist`/`CryptographicException` locally
+   until that plain account was also explicitly granted Read here. If local dev ever runs this app
+   under a different account than whoever ran the cert generation/import commands, grant that
+   account too - don't skip this step on the assumption that "local dev" automatically means "same
+   identity throughout."
 5. Set `DataProtection:CertificateThumbprint` to the thumbprint from step 1 — this value is the
    SAME on every machine (it's the same certificate), and it's not secret, so it lives directly in
    the committed `appsettings.json`, not per-environment config.
