@@ -89,19 +89,22 @@
 }
 
 #components-reconnect-modal button {
+    /* Default Blazor-template blue (#6b9ed2) only measured 2.82:1 for its white label - swapped
+       for the same conwy-ramp-2/ramp-1 pairing btn-primary already uses, which both brings this
+       on-brand and clears 4.5:1 (7.37:1 base, 6.11:1 hover/active). */
     border: 0;
-    background-color: #6b9ed2;
+    background-color: var(--conwy-ramp-2, #31597c);
     color: white;
     padding: 4px 24px;
     border-radius: 4px;
 }
 
     #components-reconnect-modal button:hover {
-        background-color: #3b6ea2;
+        background-color: var(--conwy-ramp-1, #565f90);
     }
 
     #components-reconnect-modal button:active {
-        background-color: #6b9ed2;
+        background-color: var(--conwy-ramp-1, #565f90);
     }
 
 .components-rejoining-animation {

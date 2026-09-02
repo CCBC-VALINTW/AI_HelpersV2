@@ -12,10 +12,19 @@
     --conwy-ramp-6: #29b5a3;
     --conwy-base: #3f4851;
 
+    /* WCAG 2.2 AA needs 4.5:1 for normal-size text/button labels, but conwy-green and
+       conwy-purple only measure 3.88:1 and 4.09:1 on white (and the same figure again for white
+       text on a conwy-purple button fill, since contrast is symmetric). These are the same two
+       hues, minimally darkened until each clears 4.5:1 - use them anywhere the brand colour
+       carries text or sits under/over white text; keep the literal swatches above for anything
+       purely decorative. */
+    --conwy-green-text: #008673;
+    --conwy-purple-text: #756fb3;
+
     --bs-body-font-family: Calibri, Arial, sans-serif;
-    --bs-primary: var(--conwy-purple);
-    --bs-primary-rgb: 125, 118, 183;
-    --bs-link-color-rgb: 0, 146, 126;
+    --bs-primary: var(--conwy-purple-text);
+    --bs-primary-rgb: 117, 111, 179;
+    --bs-link-color-rgb: 0, 134, 115;
     --bs-link-hover-color-rgb: 49, 89, 124;
     --bs-body-color: var(--conwy-base);
 }
@@ -29,49 +38,64 @@ html, body {
 .favorite-star {
     font-size: 1.3rem;
     line-height: 1;
-    color: #adb5bd;
+    /* Bootstrap's standard secondary grey (4.69:1 on white) - the previous #adb5bd measured
+       2.07:1, well under even the 3:1 a graphical/UI element like this needs. */
+    color: #6c757d;
     text-decoration: none;
 }
 
     .favorite-star:hover {
-        color: #f5b301;
+        color: #c08c01;
     }
 
     .favorite-star.is-favorite {
-        color: #f5b301;
+        color: #c08c01;
     }
 
 a, .btn-link {
-    color: var(--conwy-green);
+    color: var(--conwy-green-text);
 }
 
 .btn-primary {
     --bs-btn-color: #fff;
-    --bs-btn-bg: var(--conwy-purple);
-    --bs-btn-border-color: var(--conwy-purple);
+    --bs-btn-bg: var(--conwy-purple-text);
+    --bs-btn-border-color: var(--conwy-purple-text);
     --bs-btn-hover-bg: var(--conwy-ramp-1);
     --bs-btn-hover-border-color: var(--conwy-ramp-1);
     --bs-btn-active-bg: var(--conwy-ramp-1);
     --bs-btn-active-border-color: var(--conwy-ramp-1);
-    --bs-btn-focus-shadow-rgb: 125, 118, 183;
+    --bs-btn-focus-shadow-rgb: 117, 111, 179;
 }
 
 .btn-outline-primary {
-    --bs-btn-color: var(--conwy-purple);
-    --bs-btn-border-color: var(--conwy-purple);
-    --bs-btn-hover-bg: var(--conwy-purple);
-    --bs-btn-hover-border-color: var(--conwy-purple);
-    --bs-btn-active-bg: var(--conwy-purple);
-    --bs-btn-active-border-color: var(--conwy-purple);
-    --bs-btn-focus-shadow-rgb: 125, 118, 183;
+    --bs-btn-color: var(--conwy-purple-text);
+    --bs-btn-border-color: var(--conwy-purple-text);
+    --bs-btn-hover-bg: var(--conwy-purple-text);
+    --bs-btn-hover-border-color: var(--conwy-purple-text);
+    --bs-btn-active-bg: var(--conwy-purple-text);
+    --bs-btn-active-border-color: var(--conwy-purple-text);
+    --bs-btn-focus-shadow-rgb: 117, 111, 179;
 }
 
 .btn:focus, .btn:active:focus, .btn-link.nav-link:focus, .form-control:focus, .form-check-input:focus {
-  box-shadow: 0 0 0 0.1rem white, 0 0 0 0.25rem var(--conwy-purple);
+  box-shadow: 0 0 0 0.1rem white, 0 0 0 0.25rem var(--conwy-purple-text);
 }
 
 .content {
     padding-top: 1.1rem;
+}
+
+/* Bootstrap only weights headings 500 by default and leaves them the same colour as body text,
+   which is why headers can read as barely distinct from surrounding data - bumped to a clear
+   bold everywhere, with an accent rule under page-level h1 titles (each page has exactly one). */
+h1, h2, h3, h4, h5, h6 {
+    font-weight: 700;
+}
+
+h1 {
+    border-bottom: 2px solid var(--conwy-ramp-2, #31597c);
+    padding-bottom: 0.4rem;
+    margin-bottom: 1rem;
 }
 
 h1:focus {

@@ -105,7 +105,10 @@
     }
 
     .nav-item ::deep .nav-link {
-        color: #d7d7d7;
+        /* Lightened from Bootstrap-template #d7d7d7 - that measured 4.25:1 against the paler,
+           lower end of the sidebar's gradient (conwy-ramp-1), just under the 4.5:1 normal-text
+           needs; #dddddd clears it (4.51:1) against that same worst-case background. */
+        color: #dddddd;
         background: none;
         border: none;
         border-radius: 4px;

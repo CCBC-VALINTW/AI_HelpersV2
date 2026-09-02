@@ -20,7 +20,10 @@
         }
 
         .editor-tabs ::deep .nav-link.active {
-            background-color: var(--conwy-ramp-3, #158ab5);
+            /* ramp-3 under white text only measured 3.94:1 (needs 4.5:1) - ramp-2 clears it
+               comfortably (7.37:1) and is already used elsewhere for the same white-on-brand
+               pairing. */
+            background-color: var(--conwy-ramp-2, #31597c);
             color: #fff;
         }
 
