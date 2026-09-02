@@ -80,10 +80,15 @@ public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAd
         // it immediately, not just whatever this method returns to its caller.
         var (updatedSpend, updatedCap) = await spendStatus.RefreshAsync(userEmail, cancellationToken);
 
+        var (content, suggestedDescription) = ExtractContent(result.Text);
+        var suggestedFileName = FileNameSanitizer.Sanitize(
+            string.IsNullOrWhiteSpace(suggestedDescription) ? helper.Name : $"{helper.Name} - {suggestedDescription}",
+            fallback: helper.Name);
+
         var response = new HelperResponse
         {
-            SuggestedFileName = helper.Name,
-            Documents = [new Document { Type = DocumentType.Html, Name = helper.Name, Content = ExtractContent(result.Text) }]
+            SuggestedFileName = suggestedFileName,
+            Documents = [new Document { Type = DocumentType.Html, Name = suggestedFileName, Content = content }]
         };
 
         return new HelperInvocationOutcome { Response = response, Spend = updatedSpend, Cap = updatedCap };
@@ -121,16 +126,28 @@ public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAd
         return uploaded is { Count: > 0 } ? [knowledgeAttachment, .. uploaded] : [knowledgeAttachment];
     }
 
+    private static readonly Regex SuggestedFileNameMarker =
+        new(@"\s*<!--\s*SUGGESTED_FILENAME:\s*(.*?)\s*-->\s*", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
     /// <summary>
     /// Defensive backstop for when a model wraps its response in a markdown code fence plus
     /// chat-style commentary (an intro line, a follow-up question) despite being told not to -
     /// prompt-following alone isn't fully reliable. If a fenced block is present anywhere in the
     /// response, keeps only its contents and discards the surrounding commentary; otherwise
-    /// returns the response as-is.
+    /// returns the response as-is. Also extracts and strips BedrockAdapter's SUGGESTED_FILENAME
+    /// marker first (see its own doc comment) - done before the fence check so the marker is never
+    /// mistaken for part of a fenced block's own content, regardless of which side of the fence it
+    /// ends up on.
     /// </summary>
-    private static string ExtractContent(string text)
+    private static (string Content, string? SuggestedDescription) ExtractContent(string text)
     {
-        var match = Regex.Match(text, "```[a-zA-Z]*\\s*\\n(.*?)\\n```", RegexOptions.Singleline);
-        return (match.Success ? match.Groups[1].Value : text).Trim();
+        var markerMatch = SuggestedFileNameMarker.Match(text);
+        var suggestedDescription = markerMatch.Success ? markerMatch.Groups[1].Value.Trim() : null;
+        var withoutMarker = markerMatch.Success ? SuggestedFileNameMarker.Replace(text, "\n", 1) : text;
+
+        var fenceMatch = Regex.Match(withoutMarker, "```[a-zA-Z]*\\s*\\n(.*?)\\n```", RegexOptions.Singleline);
+        var content = (fenceMatch.Success ? fenceMatch.Groups[1].Value : withoutMarker).Trim();
+
+        return (content, string.IsNullOrWhiteSpace(suggestedDescription) ? null : suggestedDescription);
     }
 }

@@ -85,6 +85,21 @@ public class BedrockAdapter(HttpClient httpClient, ICredentialStore credentialSt
         "answer partway through and needing to backtrack from or ignore content you've already " +
         "committed to.";
 
+    // Asks only for the short description, not the whole suggested filename - the Helper's own
+    // name is prepended deterministically in C# (HelperInvocationService.ExtractContent) rather
+    // than trusted to the model, so there's no risk of it being reworded, mistranslated or
+    // dropped. Wrapped as an HTML comment (inert if it ever leaked through unstripped) and placed
+    // last, matching HtmlStructureReinforcement/ReviewFooterInstruction's own "models weight later
+    // instructions more heavily" reasoning.
+    private const string SuggestedFileNameInstruction =
+        "After the very end of your response content (including the review footer above), on a " +
+        "new line by itself, add exactly one line in this exact format: " +
+        "<!--SUGGESTED_FILENAME:a short 3 to 8 word description of this specific document's " +
+        "content, in Title Case-->. Do not include the Helper's own name in it, only the " +
+        "description - the Helper's name is added separately afterwards. This marker line is " +
+        "mechanically extracted and removed before your response is used, so its format must " +
+        "match exactly, with nothing else on that line.";
+
     public LlmProvider Provider => LlmProvider.AwsBedrock;
 
     public async Task<LlmInvocationResult> InvokeAsync(LlmInvocationRequest request, CancellationToken cancellationToken = default)
@@ -152,7 +167,8 @@ public class BedrockAdapter(HttpClient httpClient, ICredentialStore credentialSt
                 : null,
             HtmlStructureReinforcement,
             ReviewFooterInstruction,
-            helper.ContextQuestions.Count > 0 ? ContextAnswersReinforcement : null
+            helper.ContextQuestions.Count > 0 ? ContextAnswersReinforcement : null,
+            SuggestedFileNameInstruction
         }.Where(p => !string.IsNullOrWhiteSpace(p));
 
         // Documents/images before the text block - the order the Converse API examples use, and

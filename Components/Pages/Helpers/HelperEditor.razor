@@ -761,13 +761,8 @@ else
     private string KnowledgeDownloadUri() =>
         $"data:{KnowledgeMimeType()};base64,{_knowledgeData}";
 
-    private string KnowledgeDownloadFileName()
-    {
-        var baseName = string.IsNullOrWhiteSpace(_name) ? "knowledge-document" : _name;
-        var invalid = System.IO.Path.GetInvalidFileNameChars();
-        var cleaned = new string([.. baseName.Select(c => invalid.Contains(c) ? '-' : c)]);
-        return $"{cleaned}.{_knowledgeFileType}";
-    }
+    private string KnowledgeDownloadFileName() =>
+        $"{FileNameSanitizer.Sanitize(_name, fallback: "knowledge-document")}.{_knowledgeFileType}";
 
     private string KnowledgeMimeType() => _knowledgeFileType switch
     {

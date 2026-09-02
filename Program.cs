@@ -218,7 +218,7 @@ app.MapGet("/documents/{id:int}/export/{format}", async (
         return Results.NotFound();
     }
 
-    var fileName = SanitizeFileName(document.Title);
+    var fileName = FileNameSanitizer.Sanitize(document.Title);
 
     return format switch
     {
@@ -235,12 +235,3 @@ app.MapGet("/documents/{id:int}/export/{format}", async (
 });
 
 app.Run();
-
-// Mirrors HelperDetail.razor's own SanitizeFileName - kept as a local function here rather than a
-// shared helper since it's a one-line, well-contained rule with no other natural shared home.
-static string SanitizeFileName(string name)
-{
-    var invalid = Path.GetInvalidFileNameChars();
-    var cleaned = new string([.. name.Select(c => invalid.Contains(c) ? '-' : c)]);
-    return string.IsNullOrWhiteSpace(cleaned) ? "document" : cleaned;
-}
