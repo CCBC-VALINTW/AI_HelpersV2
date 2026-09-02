@@ -16,6 +16,7 @@
 @inject IUrlFetchService UrlFetch
 @inject IJSRuntime JS
 @inject NavigationManager Nav
+@inject IFeedbackPromptService FeedbackPrompt
 
 <PageTitle>@(_helper?.Name ?? "Helper")</PageTitle>
 
@@ -88,9 +89,9 @@ else
         }
     </div>;
 
-    // Shared between the initial "Run this Helper" card and the post-output "Refine" panel -
-    // both toggles apply to whichever call comes next regardless of which card is visible when
-    // they're set (RunHelper and TweakHelper both flow through the same BuildEffectiveInput).
+    // Shared between the pre- and post-output states of the Options card - both toggles apply
+    // to whichever call comes next regardless of when they're set (RunOrRefine always flows
+    // through the same BuildEffectiveInput).
     RenderFragment RenderPreferenceToggles = @<div class="d-flex flex-column gap-2">
         <div>
             <div class="form-check">
@@ -273,22 +274,9 @@ else
                             }
                         }
 
-                        @if (_output is null)
+                        @if (_output is null && _running)
                         {
-                            <div class="d-flex align-items-center justify-content-end gap-2 border-top pt-3">
-                                <button class="btn btn-primary btn-lg" @onclick="RunHelper" disabled="@(_running || !ContextAnswersValid)">
-                                    @(_running ? "Running…" : "Run")
-                                </button>
-                            </div>
-                            @if (!ContextAnswersValid)
-                            {
-                                <p class="text-danger small text-end mb-0 mt-1">Please answer all required questions in the panel on the right before running.</p>
-                            }
-
-                            @if (_running)
-                            {
-                                @RenderWaitingPanel
-                            }
+                            @RenderWaitingPanel
                         }
                     </div>
                 }
@@ -324,7 +312,7 @@ else
                                     </select>
                                 </div>
                                 <div class="d-flex align-items-center gap-2">
-                                    <a class="btn btn-outline-secondary btn-sm" href="@BuildOutputDataUri()" download="@(SanitizeFileName(_helper.Name) + ".html")">Download as HTML</a>
+                                    <a class="btn btn-outline-secondary btn-sm" href="@BuildOutputDataUri()" download="@(FileNameSanitizer.Sanitize(_suggestedFileName ?? _helper.Name, fallback: "helper-output") + ".html")">Download as HTML</a>
                                     <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="OpenInNewTab">Open in new tab</button>
                                     <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="StartEditing">Edit the result</button>
                                 </div>
@@ -364,14 +352,23 @@ else
                     @RenderPreferenceToggles
 
                     <div>
-                        <label class="form-label small mb-1" for="tweakInput">Refine this result</label>
-                        <textarea id="tweakInput" class="form-control form-control-sm mb-2" rows="3"
-                                  placeholder="@(_output is null ? "Run the Helper first to enable refinements" : "Optional - e.g. make it more formal. Leave blank if you've just changed an option above.")"
-                                  @bind="_tweakInput" disabled="@(_running || _output is null)"></textarea>
-                        <button type="button" class="btn btn-primary btn-sm w-100" @onclick="TweakHelper"
-                                disabled="@(_running || _output is null || (string.IsNullOrWhiteSpace(_tweakInput) && !OptionsChangedSinceLastRun()))">
-                            @(_running ? "Refining…" : "Refine")
+                        @if (_output is not null)
+                        {
+                            <label class="form-label small mb-1" for="tweakInput">Refine this result</label>
+                            <textarea id="tweakInput" class="form-control form-control-sm mb-2" rows="3"
+                                      placeholder="Optional - e.g. make it more formal. Leave blank if you've just changed the input or an option above."
+                                      @bind="_tweakInput" disabled="@_running"></textarea>
+                        }
+                        <button type="button" class="btn btn-primary btn-sm w-100" @onclick="RunOrRefine"
+                                disabled="@(_running || !ContextAnswersValid)">
+                            @(_output is null
+                                ? (_running ? "Running…" : "Run")
+                                : (_running ? "Refining…" : "Refine"))
                         </button>
+                        @if (_output is null && !ContextAnswersValid)
+                        {
+                            <p class="text-danger small mb-0 mt-1">Please answer all required questions above before running.</p>
+                        }
                     </div>
 
                     @if (_output is not null)
@@ -411,6 +408,7 @@ else
     private decimal _spend;
     private decimal _cap;
     private string? _output;
+    private string? _suggestedFileName;
     private List<Data.Entities.Stylesheet> _stylesheets = [];
     private int? _selectedStylesheetId;
     private bool _editing;
@@ -445,7 +443,6 @@ else
     private bool _isFavorite;
     private string _lastInput = "";
     private string _tweakInput = "";
-    private string _lastOptionsSnapshot = "";
     private bool _useRoleInfo;
     private string _roleInfo = "";
     private List<Data.Entities.PersonalityPrompt> _personalities = [];
@@ -600,16 +597,6 @@ else
         Nav.NavigateTo($"/helpers/editor/{clone.Id}");
     }
 
-    private async Task RunHelper()
-    {
-        if (_helper is null) return;
-
-        // Reading the input editor's content and collapsing/destroying it on success both now
-        // live in ExecuteAsync itself, shared with TweakHelper - a refine can involve exactly the
-        // same "input card was reopened and edited" situation as a first run.
-        await ExecuteAsync();
-    }
-
     /// <summary>
     /// Collapsing reads the live editor content back into _lastInput before tearing it down (so
     /// nothing typed is lost); expanding re-creates it seeded from _lastInput via
@@ -634,18 +621,21 @@ else
     }
 
     /// <summary>
-    /// V1's `{#tweak}` mechanism, kept deliberately simple per Will's direction (a real
-    /// multi-turn conversation belongs in the future Helper editor/designer phase, not here) -
-    /// just folds an extra instruction into the same input string and re-runs as a fresh,
-    /// stateless call, exactly like V1 did. Each tweak builds on the previous one cumulatively
-    /// (not just the original input), so successive refinements stack.
+    /// The single Run/Refine button's handler, for both the first run and every refinement after
+    /// it (V1's `{#tweak}` mechanism, kept deliberately simple per Will's direction - a real
+    /// multi-turn conversation belongs in the future Helper editor/designer phase, not here).
+    /// Deliberately unconditional now - this used to require the tweak box to be non-blank or an
+    /// option to have visibly changed since the last run, but that check couldn't see a change to
+    /// the input text/attachments/URL itself (those live in the TinyMCE editor and JS-side state,
+    /// not a plain bound field, so there was no cheap way to fingerprint them) - a real, reported
+    /// bug: editing the input and nothing else left the button permanently disabled. Simpler and
+    /// more robust to just always allow it once the basic preconditions (not already running, all
+    /// required context questions answered) are met, same as Run always was - trust the user
+    /// rather than trying to out-guess every way the "next call" could differ from the last one.
     /// </summary>
-    private async Task TweakHelper()
+    private async Task RunOrRefine()
     {
-        // The tweak box itself is optional - if the user has instead changed an option (org info,
-        // personality, a context answer) since the last run, that alone is reason enough to
-        // refine; only block when there's genuinely nothing new to feed in.
-        if (_helper is null || (string.IsNullOrWhiteSpace(_tweakInput) && !OptionsChangedSinceLastRun())) return;
+        if (_helper is null) return;
 
         if (_editing)
         {
@@ -654,15 +644,9 @@ else
             _editing = false;
         }
 
-        var tweak = _tweakInput.Trim();
-        _tweakInput = "";
-        if (!string.IsNullOrWhiteSpace(tweak))
-        {
-            _lastInput = string.IsNullOrWhiteSpace(_lastInput)
-                ? tweak
-                : $"{_lastInput}\n\nAdditional refinement instruction: {tweak}";
-        }
-
+        // Reading the input editor's live content, folding in any typed tweak, and collapsing/
+        // destroying the editor on success all now live in ExecuteAsync itself, in that order -
+        // see its own comment for why the order specifically matters.
         await ExecuteAsync();
     }
 
@@ -686,10 +670,14 @@ else
             {
                 HelperDefinitionId = _helper.Id,
                 CreatedByEmail = _email,
-                Title = _helper.Name,
+                Title = _suggestedFileName ?? _helper.Name,
                 // Deliberately NOT sanitized - the structured editor preserves the original
                 // document's styling/interactivity verbatim by design, see its own comments.
                 HtmlContent = _output,
+                // Carries over whatever's selected in the preview above right now, so the editor
+                // opens looking the same as what was just reviewed - the editor can change it
+                // afterwards via its own picker.
+                StylesheetId = _selectedStylesheetId,
                 CreatedAtUtc = DateTime.UtcNow,
                 LastModifiedAtUtc = DateTime.UtcNow,
             };
@@ -711,6 +699,7 @@ else
     private void StartOver()
     {
         _output = null;
+        _suggestedFileName = null;
         _errorMessage = null;
         _budgetExceeded = false;
         _lastInput = "";
@@ -734,11 +723,24 @@ else
 
         // If the input card is currently expanded (either the first run, or the user re-opened it
         // to edit ahead of a refine), the TinyMCE editor - not _lastInput - holds the live truth.
+        // Must happen BEFORE the tweak fold-in below, not after - real bug this was fixed from:
+        // folding the tweak into _lastInput first and THEN overwriting _lastInput from the editor
+        // silently discarded whatever had just been typed into the tweak box, any time the main
+        // input card also happened to be expanded.
         if (!_inputCollapsed && !_helper.IsExternal)
         {
             var inputModule = await GetModuleAsync();
             var rawInput = await inputModule.InvokeAsync<string>("getHtml", "input");
             _lastInput = HtmlContentSanitizer.Sanitize(rawInput);
+        }
+
+        var tweak = _tweakInput.Trim();
+        _tweakInput = "";
+        if (!string.IsNullOrWhiteSpace(tweak))
+        {
+            _lastInput = string.IsNullOrWhiteSpace(_lastInput)
+                ? tweak
+                : $"{_lastInput}\n\nAdditional refinement instruction: {tweak}";
         }
 
         var effectiveInput = BuildEffectiveInput(_lastInput);
@@ -772,6 +774,15 @@ else
             if (newOutput is not null)
             {
                 _output = newOutput;
+                // Regenerated on every run/refine, same as _output itself - the content just
+                // changed, so the suggestion should reflect it rather than staying stuck on
+                // whatever the first run produced.
+                _suggestedFileName = outcome.Response?.SuggestedFileName ?? _helper.Name;
+
+                // Pulses the NavMenu "Feedback" link rather than popping a modal - see
+                // IFeedbackPromptService's own doc comment for why. Idempotent, fine to call on
+                // every run/refine, not just the first.
+                FeedbackPrompt.NotifyRunCompleted();
 
                 // Mirrors V1: every Helper effectively has a stylesheet selected (even if it's an
                 // inert "No Stylesheet" one) - default to the Helper's own choice on the first run
@@ -779,10 +790,6 @@ else
                 // while reviewing the result.
                 _selectedStylesheetId ??= _helper.DefaultStylesheetId
                     ?? _stylesheets.FirstOrDefault(s => !HasRealStyling(s.Css))?.Id;
-
-                // Snapshot of what fed this run, so a later Refine can tell whether org
-                // info/personality/context answers have changed even with an empty tweak box.
-                _lastOptionsSnapshot = BuildOptionsSnapshot();
 
                 // Collapse the input card on every successful run/refine, not just the first -
                 // its content is already synced into _lastInput above, so nothing is lost by
@@ -836,20 +843,6 @@ else
         parts.Add(baseInput);
         return string.Join("\n\n", parts);
     }
-
-    /// <summary>
-    /// A cheap fingerprint of everything BuildEffectiveInput folds in besides the typed tweak
-    /// text itself - lets Refine tell whether the user changed an option (org info, personality,
-    /// a context answer) since the last run, so a Refine with an empty tweak box is only blocked
-    /// when NOTHING has actually changed, not whenever the box happens to be empty.
-    /// </summary>
-    private string BuildOptionsSnapshot() => string.Join("|",
-        _useRoleInfo, _roleInfo,
-        _selectedPersonalityId,
-        string.Join(";", _contextAnswers.Select(a =>
-            $"{a.Question.Id}:{a.Text}:{a.Document?.Name}:{a.BoolValue}")));
-
-    private bool OptionsChangedSinceLastRun() => BuildOptionsSnapshot() != _lastOptionsSnapshot;
 
     private async Task SaveRoleInfoAsync()
     {
@@ -1252,13 +1245,6 @@ else
     /// </summary>
     private string BuildOutputDataUri() =>
         "data:text/html;charset=utf-8;base64," + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(BuildOutputDocument(_output!, GetSelectedCss())));
-
-    private static string SanitizeFileName(string name)
-    {
-        var invalid = System.IO.Path.GetInvalidFileNameChars();
-        var cleaned = new string([.. name.Select(c => invalid.Contains(c) ? '-' : c)]);
-        return string.IsNullOrWhiteSpace(cleaned) ? "helper-output" : cleaned;
-    }
 
     /// <summary>Short plain-text preview shown when the input card is collapsed, so there's still
     /// some visibility into what's there without needing to expand it every time.</summary>
