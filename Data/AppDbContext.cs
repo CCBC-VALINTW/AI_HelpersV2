@@ -91,7 +91,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
         modelBuilder.Entity<HelperContextQuestion>(e =>
         {
-            e.Property(p => p.Label).HasMaxLength(256).IsRequired();
+            // 1024, not the original 256 - widened for the V1 AllowContext/ContextPrompt
+            // migration, whose ContextPrompt guidance text (now the Label for a synthesized
+            // Document question - see the AddSelectContextQuestionsRetireAllowContext and
+            // Tools/DataMigration comments) ran up to ~360 characters for some real Helpers, well
+            // past a typical short question label.
+            e.Property(p => p.Label).HasMaxLength(1024).IsRequired();
             e.Property(p => p.Type).HasConversion<string>().HasMaxLength(10);
             e.Property(p => p.UsageInstruction).HasMaxLength(1024);
             e.Property(p => p.OptionsJson).HasMaxLength(4000);
