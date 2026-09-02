@@ -108,7 +108,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.Property(p => p.UserId).HasMaxLength(256).IsRequired();
             e.Property(p => p.HelperName).HasMaxLength(128);
-            e.Property(p => p.Cost).HasPrecision(18, 8);
+            e.Property(p => p.UsdCost).HasPrecision(18, 8);
             e.HasIndex(p => new { p.UserId, p.Timestamp });
 
             e.HasOne(p => p.HelperDefinition)
