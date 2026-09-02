@@ -66,6 +66,10 @@
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='white' viewBox='0 0 16 16'%3E%3Cpath d='M4 1a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5.414a1 1 0 0 0-.293-.707l-3.414-3.414A1 1 0 0 0 8.586 1H4zm5 1.5L11.5 5H9.5a.5.5 0 0 1-.5-.5V2.5zM5.5 8h5a.5.5 0 0 1 0 1h-5a.5.5 0 0 1 0-1zm0 2.5h5a.5.5 0 0 1 0 1h-5a.5.5 0 0 1 0-1zm0-5h2a.5.5 0 0 1 0 1h-2a.5.5 0 0 1 0-1z'/%3E%3C/svg%3E");
 }
 
+.bi-feedback-nav-menu {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='white' viewBox='0 0 16 16'%3E%3Cpath d='M2.5 2A1.5 1.5 0 0 0 1 3.5v6A1.5 1.5 0 0 0 2.5 11H4v2.5a.5.5 0 0 0 .8.4L7.5 11h6A1.5 1.5 0 0 0 15 9.5v-6A1.5 1.5 0 0 0 13.5 2h-11z'/%3E%3C/svg%3E");
+}
+
 .bi-gear-fill-nav-menu {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='white' class='bi bi-gear-fill' viewBox='0 0 16 16'%3E%3Cpath d='M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-2.105.872l-.31-.17c-1.283-.698-2.686.705-1.987 1.987l.169.311c.446.82.023 1.841-.872 2.105l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .872 2.105l-.17.31c-.698 1.283.705 2.686 1.987 1.987l.311-.169a1.464 1.464 0 0 1 2.105.872l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 2.105-.872l.31.17c1.283.698 2.686-.705 1.987-1.987l-.169-.311a1.464 1.464 0 0 1 .872-2.105l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.872-2.105l.17-.31c.698-1.283-.705-2.686-1.987-1.987l-.311.169a1.464 1.464 0 0 1-2.105-.872zM8 10.93a2.929 2.929 0 1 1 0-5.86 2.929 2.929 0 0 1 0 5.858z'/%3E%3C/svg%3E");
 }
@@ -120,6 +124,38 @@
 .nav-item ::deep .nav-link:hover {
     background-color: rgba(255,255,255,0.1);
     color: white;
+}
+
+/* A plain <button> styled as a nav-link (Feedback) - .nav-link above already resets
+   border/background/width/layout, this just resets the remaining <button>-specific defaults
+   an <a> never had in the first place. */
+.feedback-nav-button {
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+/* Draws attention to Feedback after a Helper run, instead of an automatic popup - see
+   IFeedbackPromptService's own doc comment for why. Keeps quietly repeating until clicked, no
+   cap/timeout needed - sized to actually catch the eye (wide glow ring, strong colour swing, a
+   slight breathing scale) while staying a colour/size pulse rather than a shake or bounce, so it
+   still reads as "something to notice" rather than "something wrong". */
+.feedback-pulse {
+    animation: feedback-pulse-glow 1.4s ease-in-out infinite;
+    color: white;
+}
+
+@keyframes feedback-pulse-glow {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(124, 118, 183, 0.9);
+        background-color: rgba(124, 118, 183, 0.25);
+        transform: scale(1);
+    }
+    50% {
+        box-shadow: 0 0 0 14px rgba(124, 118, 183, 0);
+        background-color: rgba(124, 118, 183, 0.75);
+        transform: scale(1.06);
+    }
 }
 
 .nav-scrollable {

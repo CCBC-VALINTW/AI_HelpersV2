@@ -16,4 +16,8 @@ public class Feedback
 
     public int? HelperDefinitionId { get; set; }
     public HelperDefinition? HelperDefinition { get; set; }
+
+    /// <summary>Added in V2 - V1's row had no timestamp at all. Lets feedback be sorted/reported on
+    /// by recency.</summary>
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 }

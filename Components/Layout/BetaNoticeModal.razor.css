@@ -1,0 +1,38 @@
+#beta-notice-modal {
+    width: 28rem;
+    max-width: calc(100vw - 2rem);
+    margin: 15vh auto;
+    padding: 2rem;
+    border: 0;
+    border-radius: 0.5rem;
+    box-shadow: 0 3px 6px 2px rgba(0, 0, 0, 0.3);
+    position: relative;
+}
+
+#beta-notice-modal::backdrop {
+    background-color: rgba(0, 0, 0, 0.4);
+}
+
+#beta-notice-modal h2 {
+    margin-top: 0;
+}
+
+#beta-notice-modal p {
+    margin-bottom: 1.5rem;
+}
+
+.beta-notice-close {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.75rem;
+    border: 0;
+    background: none;
+    font-size: 1.5rem;
+    line-height: 1;
+    color: #666;
+    cursor: pointer;
+}
+
+.beta-notice-close:hover {
+    color: #000;
+}

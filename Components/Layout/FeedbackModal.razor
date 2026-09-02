@@ -1,0 +1,211 @@
+@implements IAsyncDisposable
+@using AiHelpers.Data
+@inject AppDbContext Db
+@inject IJSRuntime JS
+
+<dialog @ref="_dialogRef" id="feedback-modal" data-nosnippet>
+    <button type="button" class="feedback-close" aria-label="Close" @onclick="DismissAsync">&times;</button>
+
+    @if (_submitted)
+    {
+        <h2>Thank you!</h2>
+        <p>Your feedback helps us measure benefits and shape what we build next.</p>
+    }
+    else
+    {
+        <h2>Feedback</h2>
+        <p class="text-muted">
+            Thank you for using Conwy AI Helpers today. Please take a moment to feed back on your
+            experience with @(_helperName ?? "Conwy AI Helpers"). We will use this feedback to
+            measure benefits and inform future developments.
+        </p>
+
+        <div class="mb-3">
+            <label class="form-label d-block">Overall - how well did the helper perform its job for you today?</label>
+            <div class="form-text mb-1">Score from 1 to 5 - 1 being very poor and 5 being very good</div>
+            <div class="btn-group" role="group">
+                @for (var score = 1; score <= 5; score++)
+                {
+                    var s = (byte)score;
+                    <input type="radio" class="btn-check" name="overall" id="@("overall" + s)" autocomplete="off"
+                           checked="@(_overall == s)" @onchange="() => _overall = s" />
+                    <label class="btn btn-outline-primary" for="@("overall" + s)">@s</label>
+                }
+            </div>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label d-block">Did the helper save you time today?</label>
+            <div class="btn-group" role="group">
+                <input type="radio" class="btn-check" name="didSaveTime" id="didSaveTimeYes" autocomplete="off"
+                       checked="@(_didSaveTime == true)" @onchange="() => _didSaveTime = true" />
+                <label class="btn btn-outline-primary" for="didSaveTimeYes">Yes</label>
+                <input type="radio" class="btn-check" name="didSaveTime" id="didSaveTimeNo" autocomplete="off"
+                       checked="@(_didSaveTime == false)" @onchange="() => _didSaveTime = false" />
+                <label class="btn btn-outline-primary" for="didSaveTimeNo">No</label>
+            </div>
+        </div>
+
+        @if (_didSaveTime == true)
+        {
+            <div class="mb-3">
+                <label class="form-label d-block">Roughly how much time saved?</label>
+                <div class="d-flex align-items-center gap-2">
+                    <input type="number" min="0" class="form-control form-control-sm w-auto" style="width:5rem"
+                           value="@_hoursSaved" @oninput="e => _hoursSaved = ParseIntOrNull(e.Value?.ToString())" />
+                    <span>hours</span>
+                    <input type="number" min="0" max="59" class="form-control form-control-sm w-auto" style="width:5rem"
+                           value="@_minutesSaved" @oninput="e => _minutesSaved = ParseByteOrNull(e.Value?.ToString())" />
+                    <span>minutes</span>
+                </div>
+            </div>
+        }
+
+        <div class="mb-3">
+            <label class="form-label" for="feedbackSuccesses">Please note anything you felt the Helper accomplished particularly well</label>
+            <textarea id="feedbackSuccesses" class="form-control" rows="2" maxlength="1024" @bind="_successes"></textarea>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label" for="feedbackFailures">Please note anything you felt the Helper really failed to do</label>
+            <textarea id="feedbackFailures" class="form-control" rows="2" maxlength="1024" @bind="_failures"></textarea>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label" for="feedbackImprovements">What improvements would you like to see?</label>
+            <textarea id="feedbackImprovements" class="form-control" rows="2" maxlength="1024" @bind="_improvements"></textarea>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label" for="feedbackOtherComments">Any other comments?</label>
+            <textarea id="feedbackOtherComments" class="form-control" rows="2" maxlength="1024" @bind="_otherComments"></textarea>
+        </div>
+
+        @if (_errorMessage is not null)
+        {
+            <p class="text-danger small">@_errorMessage</p>
+        }
+
+        <div class="d-flex justify-content-end gap-2">
+            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="DismissAsync" disabled="@_submitting">Not now</button>
+            <button type="button" class="btn btn-primary btn-sm" @onclick="SubmitAsync" disabled="@_submitting">
+                @(_submitting ? "Sending..." : "Leave Feedback")
+            </button>
+        </div>
+    }
+</dialog>
+
+@code {
+    private ElementReference _dialogRef;
+    private IJSObjectReference? _module;
+
+    private string? _helperName;
+    private int? _helperDefinitionId;
+    private string _userEmail = "";
+
+    private byte? _overall;
+    private bool? _didSaveTime;
+    private int? _hoursSaved;
+    private byte? _minutesSaved;
+    private string? _successes;
+    private string? _failures;
+    private string? _improvements;
+    private string? _otherComments;
+    private bool _submitting;
+    private bool _submitted;
+    private string? _errorMessage;
+
+    /// <summary>
+    /// The only entry point now - always a deliberate click (NavMenu's "Feedback" link, reachable
+    /// from anywhere), never an automatic popup - see project memory for why the automatic version
+    /// of this was dropped in favour of a pulsing nav hint instead. helperName/helperDefinitionId
+    /// stay as parameters (currently always null from NavMenu) in case a future entry point wants
+    /// to attribute feedback to a specific Helper again.
+    /// </summary>
+    public async Task ShowAsync(string? helperName, int? helperDefinitionId, string userEmail)
+    {
+        var module = await GetModuleAsync();
+
+        _helperName = helperName;
+        _helperDefinitionId = helperDefinitionId;
+        _userEmail = userEmail;
+        _overall = null;
+        _didSaveTime = null;
+        _hoursSaved = null;
+        _minutesSaved = null;
+        _successes = null;
+        _failures = null;
+        _improvements = null;
+        _otherComments = null;
+        _submitting = false;
+        _submitted = false;
+        _errorMessage = null;
+
+        StateHasChanged();
+        await module.InvokeVoidAsync("show", _dialogRef);
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (_overall is null || _didSaveTime is null)
+        {
+            _errorMessage = "Please answer both the overall score and whether it saved you time.";
+            return;
+        }
+
+        _errorMessage = null;
+        _submitting = true;
+        StateHasChanged();
+
+        Db.FeedbackEntries.Add(new Data.Entities.Feedback
+        {
+            Email = _userEmail,
+            Overall = _overall.Value,
+            DidSaveTime = _didSaveTime.Value,
+            HoursSaved = _didSaveTime == true ? _hoursSaved : null,
+            MinutesSaved = _didSaveTime == true ? _minutesSaved : null,
+            Successes = string.IsNullOrWhiteSpace(_successes) ? null : _successes,
+            Failures = string.IsNullOrWhiteSpace(_failures) ? null : _failures,
+            Improvements = string.IsNullOrWhiteSpace(_improvements) ? null : _improvements,
+            OtherComments = string.IsNullOrWhiteSpace(_otherComments) ? null : _otherComments,
+            HelperDefinitionId = _helperDefinitionId,
+        });
+        await Db.SaveChangesAsync();
+
+        _submitting = false;
+        _submitted = true;
+        StateHasChanged();
+
+        await Task.Delay(1500);
+        await CloseAsync();
+    }
+
+    private Task DismissAsync() => CloseAsync();
+
+    private async Task CloseAsync()
+    {
+        var module = await GetModuleAsync();
+        await module.InvokeVoidAsync("close", _dialogRef);
+    }
+
+    private static int? ParseIntOrNull(string? value) => int.TryParse(value, out var v) ? v : null;
+    private static byte? ParseByteOrNull(string? value) => byte.TryParse(value, out var v) ? v : null;
+
+    private async Task<IJSObjectReference> GetModuleAsync() =>
+        _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "/js/feedbackModal.js");
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit already gone - nothing to clean up.
+            }
+        }
+    }
+}

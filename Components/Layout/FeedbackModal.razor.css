@@ -1,0 +1,36 @@
+#feedback-modal {
+    width: 32rem;
+    max-width: calc(100vw - 2rem);
+    max-height: calc(100vh - 4rem);
+    overflow-y: auto;
+    margin: 2rem auto;
+    padding: 2rem;
+    border: 0;
+    border-radius: 0.5rem;
+    box-shadow: 0 3px 6px 2px rgba(0, 0, 0, 0.3);
+    position: relative;
+}
+
+#feedback-modal::backdrop {
+    background-color: rgba(0, 0, 0, 0.4);
+}
+
+#feedback-modal h2 {
+    margin-top: 0;
+}
+
+.feedback-close {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.75rem;
+    border: 0;
+    background: none;
+    font-size: 1.5rem;
+    line-height: 1;
+    color: #666;
+    cursor: pointer;
+}
+
+.feedback-close:hover {
+    color: #000;
+}

@@ -2,6 +2,16 @@
 @inherits LayoutComponentBase
 @inject Services.ICurrentUserService CurrentUser
 @inject Services.ISpendStatusService SpendStatus
+@inject Services.IFeedbackPromptService FeedbackPrompt
+
+@* @key gives Blazor stable identity for these two - without it, a re-render of this layout
+   (e.g. SpendStatus.Changed firing) can shift positional diffing enough to tear down and
+   recreate a <dialog> element, silently discarding its native showModal()-opened state (Blazor's
+   virtual DOM has no idea a dialog was imperatively opened via JS - that's real browser state
+   outside its tracking). Real bug hit exactly this way when FeedbackModal was added as a new
+   sibling here. *@
+<BetaNoticeModal @key="BetaNoticeModalKey" />
+<FeedbackModal @key="FeedbackModalKey" @ref="_feedbackModal" />
 
 <div class="page">
     <input type="checkbox" id="sidebarCollapse" class="sidebar-collapse-checkbox"
@@ -45,7 +55,11 @@
 </div>
 
 @code {
+    private const string BetaNoticeModalKey = "beta-notice-modal";
+    private const string FeedbackModalKey = "feedback-modal";
+
     private string? _displayName;
+    private FeedbackModal? _feedbackModal;
 
     private string SpendStatusCssClass => SpendStatus.CurrentSpend >= SpendStatus.CurrentCap
         ? "spend-status-over"
@@ -56,6 +70,7 @@
     protected override async Task OnInitializedAsync()
     {
         SpendStatus.Changed += OnSpendChanged;
+        FeedbackPrompt.ShowHandler = HandleFeedbackShowAsync;
         try
         {
             // Can be briefly reached with no signed-in user while AuthorizeRouteView is
@@ -73,5 +88,29 @@
 
     private void OnSpendChanged() => InvokeAsync(StateHasChanged);
 
-    public void Dispose() => SpendStatus.Changed -= OnSpendChanged;
+    /// <summary>Bridges NavMenu's "Feedback" link to this layout's own FeedbackModal instance -
+    /// see IFeedbackPromptService's own doc comment for why this is an awaitable delegate rather
+    /// than a plain event.</summary>
+    private async Task HandleFeedbackShowAsync(string? helperName, int? helperDefinitionId)
+    {
+        if (_feedbackModal is null) return;
+
+        string email;
+        try
+        {
+            email = await CurrentUser.GetEmailAsync();
+        }
+        catch (InvalidOperationException)
+        {
+            return; // No signed-in user to attribute feedback to - nothing to show.
+        }
+
+        await _feedbackModal.ShowAsync(helperName, helperDefinitionId, email);
+    }
+
+    public void Dispose()
+    {
+        SpendStatus.Changed -= OnSpendChanged;
+        if (FeedbackPrompt.ShowHandler == HandleFeedbackShowAsync) FeedbackPrompt.ShowHandler = null;
+    }
 }

@@ -152,6 +152,10 @@ builder.Services.AddScoped<IHelperInvocationService, HelperInvocationService>();
 // spend/cap figures never leak between users sharing the same server process.
 builder.Services.AddScoped<ISpendStatusService, SpendStatusService>();
 
+// Scoped - one event bus per circuit, so a request from one user's NavMenu click can never
+// trigger another user's FeedbackModal instance.
+builder.Services.AddScoped<IFeedbackPromptService, FeedbackPromptService>();
+
 // Stateless (no per-request/per-circuit dependencies) - the docx/pdf renderers it wraps only take
 // plain strings in and bytes out - so a singleton is fine, same as any other pure converter.
 builder.Services.AddSingleton<IDocumentExportService, DocumentExportService>();

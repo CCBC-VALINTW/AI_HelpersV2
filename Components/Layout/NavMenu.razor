@@ -44,6 +44,13 @@
             </NavLink>
         </div>
 
+        <div class="nav-item px-3">
+            <button type="button" class="nav-link feedback-nav-button @(_shouldPulse ? "feedback-pulse" : "")"
+                    title="Feedback" @onclick="RequestFeedback">
+                <span class="bi bi-feedback-nav-menu" aria-hidden="true"></span> <span class="nav-link-text">Feedback</span>
+            </button>
+        </div>
+
         @if (_isAdmin)
         {
             <div class="nav-item px-3">
@@ -55,13 +62,37 @@
     </nav>
 </div>
 
+@implements IDisposable
 @code {
     [Inject] private Services.ICurrentUserService CurrentUser { get; set; } = default!;
+    [Inject] private Services.IFeedbackPromptService FeedbackPrompt { get; set; } = default!;
 
     private bool _isAdmin;
+    private bool _shouldPulse;
 
     protected override async Task OnInitializedAsync()
     {
         _isAdmin = await CurrentUser.IsAdminAsync();
+        FeedbackPrompt.RunCompleted += OnRunCompleted;
     }
+
+    // Draws attention to the link rather than popping a modal automatically - see
+    // IFeedbackPromptService's own doc comment for why. Fires from anywhere a Helper run
+    // completes; idempotent (setting an already-true flag is a no-op), so repeated runs don't
+    // restart or stack anything.
+    private void OnRunCompleted() => InvokeAsync(() =>
+    {
+        _shouldPulse = true;
+        StateHasChanged();
+    });
+
+    // No Helper context - this isn't reached from a specific run, just wherever the user happens
+    // to be. Clicking it is what the pulse was drawing attention to, so it stops here too.
+    private Task RequestFeedback()
+    {
+        _shouldPulse = false;
+        return FeedbackPrompt.RequestAsync(null, null);
+    }
+
+    public void Dispose() => FeedbackPrompt.RunCompleted -= OnRunCompleted;
 }
