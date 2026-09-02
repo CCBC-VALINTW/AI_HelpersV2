@@ -66,7 +66,7 @@ const instances = new Map();
 /// Resolves once the framed document's bootstrap script has confirmed it's attached and ready (or,
 /// failing that, after a short timeout - see the ready/readyTimeout race below).
 /// </summary>
-export function createEditor(id, container, initialHtml) {
+export function createEditor(id, container, initialHtml, stylesheetCss) {
     destroyEditor(id);
 
     const state = {
@@ -101,7 +101,7 @@ export function createEditor(id, container, initialHtml) {
     state.onMessage = (event) => handleMessage(id, state, event);
     window.addEventListener('message', state.onMessage);
 
-    loadDocument(state, initialHtml || '');
+    loadDocument(state, initialHtml || '', stylesheetCss);
 
     return state.ready;
 }
@@ -168,7 +168,23 @@ export function destroyEditor(id) {
 // Preview iframe setup
 // ---------------------------------------------------------------------------------------------
 
-function loadDocument(state, bodyHtml) {
+// Mirrors OutputDocumentBuilder.cs (HelperDetail.razor's own preview) so the two can't drift on
+// stylesheet handling - a Stylesheet row's Css already carries its own <style> tags (V1's "No
+// Stylesheet" placeholder is literally "<style></style>"), so "real styling" means non-whitespace
+// content once those tags themselves are stripped back out for the check.
+function hasRealStyling(css) {
+    if (!css) return false;
+    return css.replace(/<\/?style[^>]*>/gi, '').trim().length > 0;
+}
+
+// A document run under "No Stylesheet" may embed its own <style> block - stripped before applying
+// a real stylesheet so the two can't fight each other's cascade, same reasoning as
+// OutputDocumentBuilder.StripEmbeddedStyles.
+function stripEmbeddedStyles(html) {
+    return html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+}
+
+function loadDocument(state, bodyHtml, stylesheetCss) {
     state.lastKnownHtml = bodyHtml;
     state.selectedPath = null;
     state.undoStack = [];
@@ -186,14 +202,23 @@ function loadDocument(state, bodyHtml) {
     // any DOM/script access back to this frame, so the opaque-origin isolation this module relies on
     // is unaffected.
     iframe.setAttribute('sandbox', 'allow-scripts allow-modals');
-    iframe.srcdoc = buildFramedDocument(bodyHtml);
+
+    // Wrapping in .rendDoc matches OutputDocumentBuilder - every migrated Stylesheet row scopes its
+    // selectors under that class. Never persisted: extractCleanBodyHtml() below unwraps it again on
+    // the way out, so HtmlContent in the DB stays exactly what was passed in here regardless of
+    // which stylesheet (if any) is currently applied.
+    const applyStylesheet = hasRealStyling(stylesheetCss);
+    const framedBody = applyStylesheet
+        ? `<div class="rendDoc">${stripEmbeddedStyles(bodyHtml)}</div>`
+        : bodyHtml;
+    iframe.srcdoc = buildFramedDocument(framedBody, applyStylesheet ? stylesheetCss : '');
 
     state.panel.previewHost.innerHTML = '';
     state.panel.previewHost.appendChild(iframe);
     state.iframe = iframe;
 }
 
-function buildFramedDocument(bodyHtml) {
+function buildFramedDocument(bodyHtml, stylesheetCss) {
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -209,6 +234,7 @@ function buildFramedDocument(bodyHtml) {
     .${SELECTED_CLASS} { outline: 3px solid #00927e !important; outline-offset: 2px !important; background-color: rgba(0, 146, 126, 0.08) !important; }
   }
 </style>
+${stylesheetCss || ''}
 </head>
 <body>${bodyHtml}
 <script id="${BOOTSTRAP_SCRIPT_ID}">${BOOTSTRAP_SOURCE}</script>
@@ -361,6 +387,14 @@ const BOOTSTRAP_SOURCE = `
       var n = withClass[i];
       n.classList.remove(HOVER_CLASS, SELECTED_CLASS);
       if (n.classList.length === 0) n.removeAttribute('class');
+    }
+    // If a stylesheet was applied, loadDocument() wrapped the body in a single top-level
+    // <div class="rendDoc"> purely for CSS scoping (see structuredEditor.js) - unwrap it again here
+    // so what's saved back is exactly what was passed in, never a stylesheet-specific wrapper.
+    // Structural check, not a flag, so it's correct no matter how many times the stylesheet has
+    // been swapped this session.
+    if (clone.children.length === 1 && clone.children[0].tagName === 'DIV' && clone.children[0].classList.contains('rendDoc')) {
+      return clone.children[0].innerHTML;
     }
     return clone.innerHTML;
   }

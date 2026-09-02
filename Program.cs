@@ -207,7 +207,7 @@ app.MapGet("/documents/{id:int}/export/{format}", async (
         ?? http.User.FindFirstValue("preferred_username")
         ?? http.User.FindFirstValue(ClaimTypes.Upn);
 
-    var document = await db.GeneratedDocuments.FirstOrDefaultAsync(d => d.Id == id);
+    var document = await db.GeneratedDocuments.Include(d => d.Stylesheet).FirstOrDefaultAsync(d => d.Id == id);
 
     // Same "not found" response whether the document doesn't exist or belongs to someone else -
     // documents are private to whoever sent them to the editor (no sharing/admin-override in this
@@ -223,11 +223,11 @@ app.MapGet("/documents/{id:int}/export/{format}", async (
     return format switch
     {
         "docx" => Results.File(
-            exportService.ToDocx(document.Title, document.HtmlContent),
+            exportService.ToDocx(document.Title, document.HtmlContent, document.Stylesheet?.Css),
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             $"{fileName}.docx"),
         "html" => Results.File(
-            exportService.ToHtml(document.Title, document.HtmlContent),
+            exportService.ToHtml(document.Title, document.HtmlContent, document.Stylesheet?.Css),
             "text/html",
             $"{fileName}.html"),
         _ => Results.BadRequest("Unsupported export format - expected docx or html."),

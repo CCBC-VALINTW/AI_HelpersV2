@@ -41,6 +41,16 @@ else
             }
         </div>
         <div class="d-flex align-items-center gap-2">
+            <label class="form-label mb-0" for="docStylesheetPicker">Stylesheet</label>
+            <select id="docStylesheetPicker" class="form-select form-select-sm w-auto"
+                    @bind="_selectedStylesheetId" @bind:after="OnStylesheetChanged" disabled="@_busy">
+                @foreach (var s in _stylesheets)
+                {
+                    <option value="@s.Id">@s.Name</option>
+                }
+            </select>
+        </div>
+        <div class="d-flex align-items-center gap-2">
             <span class="text-muted small me-1">Export:</span>
             <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => ExportAsync(ExportFormat.Docx)" disabled="@_busy">Word (.docx)</button>
             <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="PrintAsync" disabled="@_busy">PDF</button>
@@ -84,6 +94,8 @@ else
     private bool _editorNeedsInit;
     private ElementReference _editorRef;
     private IJSObjectReference? _module;
+    private List<Data.Entities.Stylesheet> _stylesheets = [];
+    private int? _selectedStylesheetId;
 
     protected override async Task OnInitializedAsync()
     {
@@ -97,9 +109,15 @@ else
             .Include(d => d.HelperDefinition)
             .FirstOrDefaultAsync(d => d.Id == Id && d.CreatedByEmail == _email);
 
+        _stylesheets = await Db.Stylesheets.OrderBy(s => s.Name).ToListAsync();
+
         if (_document is not null)
         {
             _title = _document.Title;
+            // A document sent here before this picker existed has StylesheetId null forever - falls
+            // back to "No Stylesheet" rather than guessing, matching HelperDetail.razor's own default.
+            _selectedStylesheetId = _document.StylesheetId
+                ?? _stylesheets.FirstOrDefault(s => !OutputDocumentBuilder.HasRealStyling(s.Css))?.Id;
             _editorNeedsInit = true;
         }
 
@@ -112,12 +130,24 @@ else
         {
             _editorNeedsInit = false;
             var module = await GetModuleAsync();
-            // Sanitized here (same as the TinyMCE editor this replaces) even though _document.HtmlContent
-            // was already sanitized on every prior save - this is what's fed into the preview iframe, so
-            // it's the same defense-in-depth point as before, just serving a different editing surface.
             await module.InvokeVoidAsync("createEditor", EditorId, _editorRef,
-            _document?.HtmlContent ?? "");
+                _document?.HtmlContent ?? "", GetSelectedCss());
         }
+    }
+
+    private string? GetSelectedCss() =>
+        _stylesheets.FirstOrDefault(s => s.Id == _selectedStylesheetId)?.Css;
+
+    /// <summary>Reloads the preview with the newly-picked stylesheet composed in - reads back
+    /// whatever's currently in the editor first so any not-yet-saved edits survive the swap, same
+    /// as recreating the iframe is the only way to change srcdoc-based content.</summary>
+    private async Task OnStylesheetChanged()
+    {
+        if (_document is null) return;
+
+        var module = await GetModuleAsync();
+        var currentHtml = await module.InvokeAsync<string>("getHtml", EditorId);
+        await module.InvokeVoidAsync("createEditor", EditorId, _editorRef, currentHtml, GetSelectedCss());
     }
 
     private async Task SaveAsync()
@@ -139,6 +169,7 @@ else
             // alone.
             _document.Title = _title.Trim();
             _document.HtmlContent = raw;
+            _document.StylesheetId = _selectedStylesheetId;
             _document.LastModifiedAtUtc = DateTime.UtcNow;
             await Db.SaveChangesAsync();
 

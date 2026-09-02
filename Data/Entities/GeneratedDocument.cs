@@ -20,10 +20,17 @@ public class GeneratedDocument
 
     public required string Title { get; set; }
 
-    /// <summary>Sanitized HTML (HtmlContentSanitizer) - the single source of truth both loaded into
-    /// the editor and walked by DocumentExportService for the Word/PDF/HTML exports. Re-sanitized
-    /// on every save, same as HelperDetail's output editor's ApplyEdits.</summary>
+    /// <summary>The single source of truth both loaded into the editor and walked by
+    /// DocumentExportService for the Word/PDF/HTML exports. Never has stylesheet CSS or a rendDoc
+    /// wrapper baked into it - see StylesheetId.</summary>
     public required string HtmlContent { get; set; }
+
+    /// <summary>The stylesheet applied when this document is rendered in the structured editor's
+    /// preview - composed in at render time by structuredEditor.js, same "never mutate the stored
+    /// content" principle as HelperDetail.razor's own OutputDocumentBuilder. Nullable/SetNull so
+    /// the document survives if the stylesheet is later deleted, same as HelperDefinitionId.</summary>
+    public int? StylesheetId { get; set; }
+    public Stylesheet? Stylesheet { get; set; }
 
     public DateTime CreatedAtUtc { get; set; }
     public DateTime LastModifiedAtUtc { get; set; }

@@ -10,6 +10,10 @@ namespace AiHelpers.Services;
 /// </summary>
 public interface IDocumentExportService
 {
-    byte[] ToDocx(string title, string html);
-    byte[] ToHtml(string title, string html);
+    /// <summary>stylesheetCss only ever fills in a handful of tag-level defaults (heading colour,
+    /// table border colour, base font) via DocumentExport/StylesheetTagStyles - DocxRenderer still
+    /// has no real CSS selector/cascade engine, so this is best-effort, not full fidelity with the
+    /// live preview the way HTML export now is.</summary>
+    byte[] ToDocx(string title, string html, string? stylesheetCss);
+    byte[] ToHtml(string title, string html, string? stylesheetCss);
 }

@@ -23,7 +23,7 @@ internal static class DocxRenderer
     private const int BulletNumId = 1;
     private const int DecimalNumId = 2;
 
-    public static byte[] Render(string title, IReadOnlyList<Block> blocks)
+    public static byte[] Render(string title, IReadOnlyList<Block> blocks, TagStyleDefaults? tagStyles = null)
     {
         using var stream = new MemoryStream();
         using (var doc = WordprocessingDocument.Create(stream, WordprocessingDocumentType.Document))
@@ -38,7 +38,7 @@ internal static class DocxRenderer
 
             foreach (var block in blocks)
             {
-                AppendBlock(body, mainPart, block);
+                AppendBlock(body, mainPart, block, tagStyles);
             }
 
             // A4 portrait, 2cm margins (matches this app's other exported-document conventions -
@@ -96,7 +96,7 @@ internal static class DocxRenderer
     // per depth) - Word's Symbol font glyph for a filled bullet is  regardless of level.
     private static string BulletChar(int level) => "";
 
-    private static void AppendBlock(Body body, MainDocumentPart mainPart, Block block)
+    private static void AppendBlock(Body body, MainDocumentPart mainPart, Block block, TagStyleDefaults? tagStyles)
     {
         switch (block)
         {
@@ -107,10 +107,10 @@ internal static class DocxRenderer
                 body.AppendChild(BuildRuleParagraph());
                 break;
             case ParagraphBlock p:
-                body.AppendChild(BuildParagraph(mainPart, p));
+                body.AppendChild(BuildParagraph(mainPart, p, tagStyles));
                 break;
             case TableBlock t:
-                body.AppendChild(BuildTable(mainPart, t));
+                body.AppendChild(BuildTable(mainPart, t, tagStyles));
                 break;
         }
     }
@@ -119,7 +119,7 @@ internal static class DocxRenderer
         new ParagraphBorders(new BottomBorder { Val = BorderValues.Single, Size = 6, Color = "999999" }),
         new SpacingBetweenLines { After = "160" }));
 
-    private static Paragraph BuildParagraph(MainDocumentPart mainPart, ParagraphBlock p)
+    private static Paragraph BuildParagraph(MainDocumentPart mainPart, ParagraphBlock p, TagStyleDefaults? tagStyles)
     {
         var pPr = new ParagraphProperties();
 
@@ -147,10 +147,14 @@ internal static class DocxRenderer
             pPr.SpacingBetweenLines = new SpacingBetweenLines { Before = "240", After = "120" };
         }
 
+        // Only headings get the stylesheet's colour - a body-text run keeps whatever inline colour
+        // it already has (or none), same as before this existed.
+        var headingColor = size is not null ? tagStyles?.HeadingColor : null;
+
         var paragraph = new Paragraph { ParagraphProperties = pPr };
         foreach (var run in p.Runs)
         {
-            paragraph.AppendChild(BuildRun(mainPart, run, bold, size));
+            paragraph.AppendChild(BuildRun(mainPart, run, bold, size, headingColor, tagStyles?.BaseFontFamily));
         }
         return paragraph;
     }
@@ -169,15 +173,16 @@ internal static class DocxRenderer
         _ => (false, null),
     };
 
-    private static OpenXmlElement BuildRun(MainDocumentPart mainPart, InlineRun run, bool headingBold, int? headingHalfPointSize)
+    private static OpenXmlElement BuildRun(MainDocumentPart mainPart, InlineRun run, bool headingBold, int? headingHalfPointSize,
+        (byte R, byte G, byte B)? headingColor, string? baseFontFamily)
     {
         if (run.IsLineBreak)
         {
-            return new Run(BuildRunProperties(run, headingBold, headingHalfPointSize), new Break());
+            return new Run(BuildRunProperties(run, headingBold, headingHalfPointSize, headingColor, baseFontFamily), new Break());
         }
 
         var textElement = new Text(run.Text) { Space = SpaceProcessingModeValues.Preserve };
-        var innerRun = new Run(BuildRunProperties(run, headingBold, headingHalfPointSize), textElement);
+        var innerRun = new Run(BuildRunProperties(run, headingBold, headingHalfPointSize, headingColor, baseFontFamily), textElement);
 
         if (run.Href is null || !Uri.TryCreate(run.Href, UriKind.Absolute, out var uri)) return innerRun;
 
@@ -185,7 +190,8 @@ internal static class DocxRenderer
         return new Hyperlink(innerRun) { Id = relationship.Id, History = OnOffValue.FromBoolean(true) };
     }
 
-    private static RunProperties BuildRunProperties(InlineRun run, bool headingBold, int? headingHalfPointSize)
+    private static RunProperties BuildRunProperties(InlineRun run, bool headingBold, int? headingHalfPointSize,
+        (byte R, byte G, byte B)? headingColor, string? baseFontFamily)
     {
         var props = new RunProperties();
         if (run.Bold || headingBold) props.Bold = new Bold();
@@ -193,8 +199,12 @@ internal static class DocxRenderer
         if (run.Underline) props.Underline = new Underline { Val = UnderlineValues.Single };
         if (run.Strike) props.Strike = new Strike();
         if (headingHalfPointSize is { } size) props.FontSize = new FontSize { Val = size.ToString() };
+        if (baseFontFamily is not null) props.RunFonts = new RunFonts { Ascii = baseFontFamily, HighAnsi = baseFontFamily };
+        // Stylesheet heading colour only fills in where there's no more specific inline colour -
+        // a colour the user actually applied in the editor always wins.
         if (run.Color is { } rgb) props.Color = new Color { Val = $"{rgb.R:X2}{rgb.G:X2}{rgb.B:X2}" };
         else if (run.Href is not null) props.Color = new Color { Val = "0563C1" }; // Word's default hyperlink blue
+        else if (headingColor is { } hc) props.Color = new Color { Val = $"{hc.R:X2}{hc.G:X2}{hc.B:X2}" };
         if (run.Href is not null) props.Underline ??= new Underline { Val = UnderlineValues.Single };
         return props;
     }
@@ -207,9 +217,10 @@ internal static class DocxRenderer
         _ => JustificationValues.Left,
     };
 
-    private static Table BuildTable(MainDocumentPart mainPart, TableBlock t)
+    private static Table BuildTable(MainDocumentPart mainPart, TableBlock t, TagStyleDefaults? tagStyles)
     {
         var table = new Table();
+        var borderColor = tagStyles?.TableBorderColor is { } bc ? $"{bc.R:X2}{bc.G:X2}{bc.B:X2}" : "999999";
 
         // Child order matters - this is real OOXML schema, not just a convenient object
         // initializer order, confirmed the hard way via OpenXmlValidator while building this:
@@ -219,12 +230,12 @@ internal static class DocxRenderer
         table.AppendChild(new TableProperties(
             new TableWidth { Type = TableWidthUnitValues.Pct, Width = "5000" },
             new TableBorders(
-                new TopBorder { Val = BorderValues.Single, Size = 4, Color = "999999" },
-                new LeftBorder { Val = BorderValues.Single, Size = 4, Color = "999999" },
-                new BottomBorder { Val = BorderValues.Single, Size = 4, Color = "999999" },
-                new RightBorder { Val = BorderValues.Single, Size = 4, Color = "999999" },
-                new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4, Color = "999999" },
-                new InsideVerticalBorder { Val = BorderValues.Single, Size = 4, Color = "999999" })));
+                new TopBorder { Val = BorderValues.Single, Size = 4, Color = borderColor },
+                new LeftBorder { Val = BorderValues.Single, Size = 4, Color = borderColor },
+                new BottomBorder { Val = BorderValues.Single, Size = 4, Color = borderColor },
+                new RightBorder { Val = BorderValues.Single, Size = 4, Color = borderColor },
+                new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4, Color = borderColor },
+                new InsideVerticalBorder { Val = BorderValues.Single, Size = 4, Color = borderColor })));
 
         var columnCount = t.Rows.Count == 0 ? 1 : t.Rows.Max(r => r.Cells.Count);
         var grid = new TableGrid();
@@ -251,7 +262,7 @@ internal static class DocxRenderer
                 {
                     if (contentBlock is ParagraphBlock pb)
                     {
-                        var paragraph = BuildParagraph(mainPart, cell.IsHeader ? pb with { StyleName = "Normal" } : pb);
+                        var paragraph = BuildParagraph(mainPart, cell.IsHeader ? pb with { StyleName = "Normal" } : pb, tagStyles);
                         if (cell.IsHeader)
                         {
                             foreach (var r in paragraph.Elements<Run>())

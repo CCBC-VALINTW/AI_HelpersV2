@@ -211,6 +211,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .WithMany() // No nav collection back on HelperDefinition - same reasoning as HelperFavorite above.
                 .HasForeignKey(p => p.HelperDefinitionId)
                 .OnDelete(DeleteBehavior.SetNull); // Preserve the document if its source Helper is later deleted.
+
+            e.HasOne(p => p.Stylesheet)
+                .WithMany() // No nav collection back on Stylesheet - same reasoning as above.
+                .HasForeignKey(p => p.StylesheetId)
+                .OnDelete(DeleteBehavior.SetNull); // Preserve the document if its stylesheet is later deleted.
         });
     }
 }

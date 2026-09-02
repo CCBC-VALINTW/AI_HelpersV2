@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.RegularExpressions;
 
 namespace AiHelpers.Services;
@@ -19,17 +20,22 @@ public static class OutputDocumentBuilder
         !string.IsNullOrWhiteSpace(css) &&
         !string.IsNullOrWhiteSpace(Regex.Replace(css, "</?style[^>]*>", "", RegexOptions.IgnoreCase));
 
-    public static string Build(string bodyHtml, string? stylesheetCss)
+    /// <summary>
+    /// <paramref name="title"/> is optional - the iframe preview/data-uri callers don't need a
+    /// document &lt;title&gt;, only the exported-HTML-file caller (DocumentExportService) does.
+    /// </summary>
+    public static string Build(string bodyHtml, string? stylesheetCss, string? title = null)
     {
         var applyStylesheet = HasRealStyling(stylesheetCss);
         var body = applyStylesheet ? StripEmbeddedStyles(bodyHtml) : bodyHtml;
+        var titleTag = title is null ? "" : $"<title>{WebUtility.HtmlEncode(title)}</title>\n";
 
         return $$"""
             <!DOCTYPE html>
             <html>
             <head>
             <meta charset="utf-8" />
-            <style>body { font-family: Calibri, Arial, sans-serif; margin: 1rem; }</style>
+            {{titleTag}}<style>body { font-family: Calibri, Arial, sans-serif; margin: 1rem; }</style>
             {{(applyStylesheet ? stylesheetCss : "")}}
             </head>
             <body><div class="rendDoc">{{body}}</div></body>
