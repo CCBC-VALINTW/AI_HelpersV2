@@ -51,6 +51,11 @@ public static class AttachmentClassifier
             // the content itself is already plain, human-readable text (timestamps + cue lines),
             // so it's sent as "txt" rather than needing any real parsing/extraction step.
             "vtt" => (AttachmentKind.Document, "txt"),
+            // Same reasoning as vtt above - "json" isn't a Converse document format either, and
+            // models don't take raw JSON as a distinct input type, so it's sent as "txt": the
+            // model sees the file's literal text content (still valid JSON syntax) rather than
+            // any structured/schema-aware handling.
+            "json" => (AttachmentKind.Document, "txt"),
             "jpg" or "jpeg" => (AttachmentKind.Image, "jpeg"),
             "png" or "gif" or "webp" => (AttachmentKind.Image, ext),
             _ => null

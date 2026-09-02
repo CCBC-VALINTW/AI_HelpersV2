@@ -533,7 +533,7 @@ else
     private bool _showKnowledgeText;
     private string _knowledgeText = "";
 
-    private static readonly HashSet<string> TextKnowledgeFormats = ["txt", "md", "csv", "html", "htm", "vtt"];
+    private static readonly HashSet<string> TextKnowledgeFormats = ["txt", "md", "csv", "html", "htm", "vtt", "json"];
     private bool IsTextKnowledgeFormat => _knowledgeFileType is not null && TextKnowledgeFormats.Contains(_knowledgeFileType);
 
     private bool _allowContext;

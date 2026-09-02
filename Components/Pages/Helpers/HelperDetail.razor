@@ -1120,7 +1120,7 @@ else
     private static string AttachmentAccept(Data.Entities.LlmDefinition model)
     {
         var parts = new List<string>();
-        if (model.SupportsDocument) parts.Add(".pdf,.csv,.doc,.docx,.xls,.xlsx,.html,.htm,.txt,.md,.vtt");
+        if (model.SupportsDocument) parts.Add(".pdf,.csv,.doc,.docx,.xls,.xlsx,.html,.htm,.txt,.md,.vtt,.json");
         if (model.SupportsImage) parts.Add(".png,.jpg,.jpeg,.gif,.webp");
         return string.Join(",", parts);
     }
