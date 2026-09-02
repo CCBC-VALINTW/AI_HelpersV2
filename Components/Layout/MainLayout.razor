@@ -2,6 +2,7 @@
 @inherits LayoutComponentBase
 @inject Services.ICurrentUserService CurrentUser
 @inject Services.ISpendStatusService SpendStatus
+@inject Services.IAccessLogService AccessLog
 @inject Services.IFeedbackPromptService FeedbackPrompt
 
 @* @key gives Blazor stable identity for these two - without it, a re-render of this layout
@@ -79,6 +80,10 @@
             _displayName = await CurrentUser.GetDisplayNameAsync();
             var email = await CurrentUser.GetEmailAsync();
             await SpendStatus.RefreshAsync(email);
+            // Once per real page load, same as SpendStatus above - not per in-app navigation.
+            // Silent by design (AccessLogService swallows its own failures) - never worth breaking
+            // a page load over.
+            await AccessLog.LogAsync(email);
         }
         catch (InvalidOperationException)
         {

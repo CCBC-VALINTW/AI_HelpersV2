@@ -22,6 +22,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<UserRoleInfo> UserRoleInfos => Set<UserRoleInfo>();
     public DbSet<HelperContextQuestion> HelperContextQuestions => Set<HelperContextQuestion>();
     public DbSet<GeneratedDocument> GeneratedDocuments => Set<GeneratedDocument>();
+    public DbSet<AccessLogEntry> AccessLogEntries => Set<AccessLogEntry>();
     public DbSet<Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey> DataProtectionKeys => Set<Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -143,6 +144,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .WithMany(h => h.FeedbackEntries)
                 .HasForeignKey(p => p.HelperDefinitionId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<AccessLogEntry>(e =>
+        {
+            e.Property(p => p.Email).HasMaxLength(256).IsRequired();
+            // Backs AccessLogService's own retention cleanup query (WHERE TimestampUtc < cutoff).
+            e.HasIndex(p => p.TimestampUtc);
         });
 
         modelBuilder.Entity<PersonalityPrompt>(e =>

@@ -152,6 +152,10 @@ builder.Services.AddScoped<IHelperInvocationService, HelperInvocationService>();
 // spend/cap figures never leak between users sharing the same server process.
 builder.Services.AddScoped<ISpendStatusService, SpendStatusService>();
 
+// Scoped, matching ISpendStatusService above - no per-circuit state of its own, but registered the
+// same way for consistency since both are called from MainLayout.OnInitializedAsync.
+builder.Services.AddScoped<IAccessLogService, AccessLogService>();
+
 // Scoped - one event bus per circuit, so a request from one user's NavMenu click can never
 // trigger another user's FeedbackModal instance.
 builder.Services.AddScoped<IFeedbackPromptService, FeedbackPromptService>();
