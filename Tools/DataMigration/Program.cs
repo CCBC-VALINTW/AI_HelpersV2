@@ -222,7 +222,10 @@ static async Task MigrateHelperDefinitionsAsync(SqlConnection source, AppDbConte
             KnowledgeFileType = reader.IsDBNull(24) ? null : reader.GetString(24),
             KnowledgePrompt = reader.IsDBNull(25) ? null : reader.GetString(25),
             IsExternal = !reader.IsDBNull(26) && reader.GetBoolean(26),
-            ExternalUrl = reader.IsDBNull(27) ? null : reader.GetString(27)
+            ExternalUrl = reader.IsDBNull(27) ? null : reader.GetString(27),
+            // V1 has no equivalent column (see the V1 SQL schema export) - migration time is the
+            // closest honest answer to "when was this last touched".
+            LastModifiedAtUtc = DateTime.UtcNow
         };
 
         // V2's AllowContext/ContextPrompt columns were retired in favour of the richer

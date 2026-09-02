@@ -73,6 +73,11 @@ public class HelperDefinition
     /// </summary>
     public string? OutputSchemaJson { get; set; }
 
+    /// <summary>Set on every save from the Helper Editor (see HelperEditor.razor's SaveAsync) -
+    /// V1 had no equivalent column, so a Helper migrated from it gets this set to the migration
+    /// time instead (see Tools/DataMigration/Program.cs) rather than left blank.</summary>
+    public DateTime LastModifiedAtUtc { get; set; } = DateTime.UtcNow;
+
     public ICollection<AccountingEntry> AccountingEntries { get; set; } = [];
     public ICollection<CallbackEntry> CallbackEntries { get; set; } = [];
     public ICollection<Feedback> FeedbackEntries { get; set; } = [];

@@ -30,38 +30,76 @@ else if (_helpers.Count == 0)
 }
 else
 {
-    <table class="table align-middle">
-        <thead>
-            <tr>
-                <th>Name</th>
-                <th>Scope</th>
-                <th>Category</th>
-                <th>Model</th>
-                <th></th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var h in _helpers)
-            {
+    <div class="row g-3 mb-3">
+        <div class="col-md-6">
+            <input type="search" class="form-control" placeholder="Search by name or description…"
+                   @bind="_searchTerm" @bind:event="oninput" />
+        </div>
+        <div class="col-md-4">
+            <select class="form-select" @bind="_selectedCategoryId">
+                <option value="0">All categories</option>
+                @foreach (var category in _categories)
+                {
+                    <option value="@category.Id">@category.Name</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-2">
+            <select class="form-select" @bind="_selectedScopeFilter">
+                <option value="">All</option>
+                <option value="@HelperScope.General">General</option>
+                <option value="@HelperScope.Personal">Personal</option>
+            </select>
+        </div>
+    </div>
+
+    var filtered = FilteredHelpers().ToList();
+
+    @if (filtered.Count == 0)
+    {
+        <p class="text-muted">No Helpers match your filters.</p>
+    }
+    else
+    {
+        <table class="table align-middle">
+            <thead>
                 <tr>
-                    <td>@h.Name</td>
-                    <td><span class="badge @(h.Scope == HelperScope.General ? "text-bg-primary" : "text-bg-secondary")">@h.Scope</span></td>
-                    <td>@(h.HelperCategory?.Name ?? "—")</td>
-                    <td>@(h.IsExternal ? "External" : h.LlmDefinition?.Name ?? "—")</td>
-                    <td class="text-end">
-                        <a href="@($"/helpers/editor/{h.Id}")" class="btn btn-outline-secondary btn-sm">Edit</a>
-                        <a href="@($"/helpers/{h.Id}")" class="btn btn-outline-secondary btn-sm">Open</a>
-                    </td>
+                    <th>Name</th>
+                    <th>Scope</th>
+                    <th>Category</th>
+                    <th>Model</th>
+                    <th>Last edited</th>
+                    <th></th>
                 </tr>
-            }
-        </tbody>
-    </table>
+            </thead>
+            <tbody>
+                @foreach (var h in filtered)
+                {
+                    <tr>
+                        <td>@h.Name</td>
+                        <td><span class="badge @(h.Scope == HelperScope.General ? "text-bg-primary" : "text-bg-secondary")">@h.Scope</span></td>
+                        <td>@(h.HelperCategory?.Name ?? "—")</td>
+                        <td>@(h.IsExternal ? "External" : h.LlmDefinition?.Name ?? "—")</td>
+                        <td class="text-muted">@h.LastModifiedAtUtc.ToLocalTime().ToString("g")</td>
+                        <td class="text-end">
+                            <a href="@($"/helpers/editor/{h.Id}")" class="btn btn-outline-secondary btn-sm">Edit</a>
+                            <a href="@($"/helpers/{h.Id}")" class="btn btn-outline-secondary btn-sm">Open</a>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
 }
 
 @code {
     private bool _loading = true;
     private bool _isAdmin;
     private List<HelperDefinition> _helpers = [];
+    private List<HelperCategory> _categories = [];
+    private string _searchTerm = string.Empty;
+    private int _selectedCategoryId;
+    private string _selectedScopeFilter = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
@@ -77,6 +115,35 @@ else
             .OrderBy(h => h.Name)
             .ToListAsync();
 
+        _categories = await Db.HelperCategories
+            .Where(c => _helpers.Select(h => h.HelperCategoryId).Contains(c.Id))
+            .OrderBy(c => c.Name)
+            .ToListAsync();
+
         _loading = false;
+    }
+
+    private IEnumerable<HelperDefinition> FilteredHelpers()
+    {
+        var query = _helpers.AsEnumerable();
+
+        if (_selectedCategoryId > 0)
+        {
+            query = query.Where(h => h.HelperCategoryId == _selectedCategoryId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(_selectedScopeFilter) && Enum.TryParse<HelperScope>(_selectedScopeFilter, out var scope))
+        {
+            query = query.Where(h => h.Scope == scope);
+        }
+
+        if (!string.IsNullOrWhiteSpace(_searchTerm))
+        {
+            query = query.Where(h =>
+                h.Name.Contains(_searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                (h.Description is not null && h.Description.Contains(_searchTerm, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        return query.OrderBy(h => h.Name);
     }
 }
