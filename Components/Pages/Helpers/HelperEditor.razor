@@ -340,6 +340,14 @@ else
                     }
 
                     <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => _contextQuestions.Add(new QuestionDraft())">+ Add question</button>
+                    @if (DocumentQuestionCount > MaxDocumentContextQuestions)
+                    {
+                        <p class="text-danger small mb-0 mt-2">
+                            @DocumentQuestionCount document-upload questions - Bedrock only accepts @MaxDocumentContextQuestions documents
+                            per run, so at most @MaxDocumentContextQuestions are allowed here (a run may also add the Helper's own Knowledge
+                            document). Change some to another answer type before saving.
+                        </p>
+                    }
                 </div>
             </div>
         }
@@ -571,6 +579,15 @@ else
     private string? _previewOutput;
 
     private List<QuestionDraft> PreviewQuestions => _contextQuestions.Where(q => !string.IsNullOrWhiteSpace(q.Label)).ToList();
+
+    // Bedrock's Converse API accepts at most 5 documents per request (see HelperDetail.razor's
+    // own limit constants) - each answered Document-type context question contributes one, on top
+    // of whatever the run page's own upload picker and the Helper's Knowledge document (if any)
+    // add. Capping the Helper's own configuration here is a config-time guardrail, not the full
+    // check - HelperDetail.razor still validates the real combined total at run time, since only
+    // it knows what a specific run actually attaches.
+    private const int MaxDocumentContextQuestions = 5;
+    private int DocumentQuestionCount => PreviewQuestions.Count(q => q.Type == ContextQuestionType.Document);
 
     private string _stylesheetId = "";
     private string _outputSchemaJson = "";
@@ -899,6 +916,12 @@ else
     private async Task SaveAsync()
     {
         if (string.IsNullOrWhiteSpace(_name)) return;
+
+        if (DocumentQuestionCount > MaxDocumentContextQuestions)
+        {
+            _saveError = $"Too many document-upload context questions ({DocumentQuestionCount}) - Bedrock only accepts {MaxDocumentContextQuestions} documents per run, so at most {MaxDocumentContextQuestions} are allowed.";
+            return;
+        }
 
         _saving = true;
         _saveError = null;

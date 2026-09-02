@@ -370,7 +370,7 @@ else
                                       @bind="_tweakInput" disabled="@_running"></textarea>
                         }
                         <button type="button" class="btn btn-primary btn-sm w-100" @onclick="RunOrRefine"
-                                disabled="@(_running || !ContextAnswersValid)">
+                                disabled="@(_running || !ContextAnswersValid || !AttachmentTotalsWithinLimits())">
                             @(_output is null
                                 ? (_running ? "Running…" : "Run")
                                 : (_running ? "Refining…" : "Refine"))
@@ -378,6 +378,10 @@ else
                         @if (_output is null && !ContextAnswersValid)
                         {
                             <p class="text-danger small mb-0 mt-1">Please answer all required questions above before running.</p>
+                        }
+                        @if (!AttachmentTotalsWithinLimits())
+                        {
+                            <p class="text-danger small mb-0 mt-1">@AttachmentLimitMessage()</p>
                         }
                     </div>
 
@@ -460,13 +464,65 @@ else
     private string _selectedPersonalityId = "";
     private bool _sendingToEditor;
 
-    // AWS doesn't publish exact per-file Converse API limits on its own reference pages - these
-    // are conservative, commonly-cited figures, not confirmed exact quotas. If they're off,
-    // Bedrock's own 400 response (surfaced verbatim by BedrockAdapter) is the real authority,
-    // same as how the temperature/top_p sampling-param limits got sorted out empirically.
+    // Confirmed against AWS's own Converse API reference (Message.content): up to 5 documents
+    // (4.5MB each) and up to 20 images (3.75MB, 8000x8000px each) per request - real published
+    // quotas, not a guessed conservative figure. If they're ever off, Bedrock's own 400 response
+    // (surfaced verbatim by BedrockAdapter) is the real authority, same as how the temperature/
+    // top_p sampling-param limits got sorted out empirically.
+    //
+    // The count limits apply to the COMBINED total that ends up in one Converse request, not just
+    // this page's own upload picker - see CurrentAttachmentTotals, which also counts the Helper's
+    // own Knowledge document (prepended server-side, see HelperInvocationService.BuildAttachments)
+    // and every context-question Document answer, neither of which this page would otherwise know
+    // about when deciding whether one more upload still fits.
     private const long MaxDocumentBytes = 4_500_000;
     private const long MaxImageBytes = 3_750_000;
-    private const int MaxAttachments = 5;
+    private const int MaxDocumentAttachments = 5;
+    private const int MaxImageAttachments = 20;
+
+    /// <summary>Every source that ends up in one combined Converse content array: the Helper's own
+    /// Knowledge document (if configured), every context-question Document answer, and this page's
+    /// own upload picker - counted separately by AttachmentKind since Bedrock's document and image
+    /// limits are independent of each other.</summary>
+    private (int Documents, int Images) CurrentAttachmentTotals()
+    {
+        var docs = 0;
+        var images = 0;
+        void Tally(AttachmentKind kind) { if (kind == AttachmentKind.Document) docs++; else images++; }
+
+        if (_helper is { HasKnowledge: true, KnowledgeFileType: { } knowledgeFileType } &&
+            AttachmentClassifier.ClassifyExtension(knowledgeFileType) is { } knowledgeClass)
+        {
+            Tally(knowledgeClass.Kind);
+        }
+        foreach (var a in _attachments) Tally(a.Kind);
+        foreach (var a in _contextAnswers)
+        {
+            if (a.Document is not null) Tally(a.Document.Kind);
+        }
+
+        return (docs, images);
+    }
+
+    private bool AttachmentTotalsWithinLimits()
+    {
+        var (docs, images) = CurrentAttachmentTotals();
+        return docs <= MaxDocumentAttachments && images <= MaxImageAttachments;
+    }
+
+    private string? AttachmentLimitMessage()
+    {
+        var (docs, images) = CurrentAttachmentTotals();
+        if (docs > MaxDocumentAttachments)
+        {
+            return $"Too many documents for this run: {docs} (including any Knowledge document and context-question uploads) - the limit is {MaxDocumentAttachments}.";
+        }
+        if (images > MaxImageAttachments)
+        {
+            return $"Too many images for this run: {images} - the limit is {MaxImageAttachments}.";
+        }
+        return null;
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -730,6 +786,11 @@ else
     private async Task ExecuteAsync()
     {
         if (_helper is null) return;
+
+        // Belt-and-braces - the Run/Refine button is already disabled while this is true, but
+        // this guards direct calls to ExecuteAsync (e.g. a stale render) from ever reaching
+        // Bedrock with a combined attachment count it will just reject outright.
+        if (!AttachmentTotalsWithinLimits()) return;
 
         // If the input card is currently expanded (either the first run, or the user re-opened it
         // to edit ahead of a refine), the TinyMCE editor - not _lastInput - holds the live truth.
@@ -1010,17 +1071,11 @@ else
         _attachmentError = null;
 
         // GetMultipleFiles throws if more than its maximum is selected in one go, rather than
-        // truncating - pass a generous ceiling here and let the loop below enforce MaxAttachments
-        // gracefully (a user-facing message, not an unhandled exception that tears down the
-        // circuit).
+        // truncating - pass a generous ceiling here and let the per-kind checks below enforce the
+        // real Bedrock limits gracefully (a user-facing message, not an unhandled exception that
+        // tears down the circuit).
         foreach (var file in e.GetMultipleFiles(maximumFileCount: 20))
         {
-            if (_attachments.Count >= MaxAttachments)
-            {
-                _attachmentError = $"Only up to {MaxAttachments} attachments are supported per run.";
-                break;
-            }
-
             var classification = AttachmentClassifier.ClassifyExtension(Path.GetExtension(file.Name));
             if (classification is not { } c)
             {
@@ -1034,6 +1089,16 @@ else
             if (supported != true)
             {
                 _attachmentError = $"This Helper's model doesn't support {(c.Kind == AttachmentKind.Document ? "document" : "image")} attachments.";
+                continue;
+            }
+
+            var (docs, images) = CurrentAttachmentTotals();
+            var kindLimit = c.Kind == AttachmentKind.Document ? MaxDocumentAttachments : MaxImageAttachments;
+            var kindCount = c.Kind == AttachmentKind.Document ? docs : images;
+            if (kindCount >= kindLimit)
+            {
+                var kindLabel = c.Kind == AttachmentKind.Document ? "documents" : "images";
+                _attachmentError = $"This run already has the maximum of {kindLimit} {kindLabel} (including any Knowledge document and context-question uploads).";
                 continue;
             }
 
@@ -1074,6 +1139,18 @@ else
             return;
         }
 
+        // answer.Document was already cleared above, so a straight replacement of this same
+        // question's own upload never double-counts against itself here.
+        var (docs, images) = CurrentAttachmentTotals();
+        var kindLimit = c.Kind == AttachmentKind.Document ? MaxDocumentAttachments : MaxImageAttachments;
+        var kindCount = c.Kind == AttachmentKind.Document ? docs : images;
+        if (kindCount >= kindLimit)
+        {
+            var kindLabel = c.Kind == AttachmentKind.Document ? "documents" : "images";
+            answer.Error = $"This run already has the maximum of {kindLimit} {kindLabel} (including any Knowledge document and other uploads).";
+            return;
+        }
+
         var maxBytes = c.Kind == AttachmentKind.Image ? MaxImageBytes : MaxDocumentBytes;
         if (file.Size > maxBytes)
         {
@@ -1100,9 +1177,10 @@ else
         var url = _urlInput.Trim();
         if (string.IsNullOrWhiteSpace(url)) return;
 
-        if (_attachments.Count >= MaxAttachments)
+        var (docs, _) = CurrentAttachmentTotals();
+        if (docs >= MaxDocumentAttachments)
         {
-            _attachmentError = $"Only up to {MaxAttachments} attachments are supported per run.";
+            _attachmentError = $"This run already has the maximum of {MaxDocumentAttachments} documents (including any Knowledge document and context-question uploads) - a URL fetch always counts as a document.";
             return;
         }
 
