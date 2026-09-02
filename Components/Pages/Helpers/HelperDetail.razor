@@ -78,6 +78,16 @@ else
                         <div class="text-danger small">@answer.Error</div>
                     }
                 }
+                else if (answer.Question.Type == ContextQuestionType.Select)
+                {
+                    <select class="form-select form-select-sm" @bind="answer.Text">
+                        <option value="">Choose…</option>
+                        @foreach (var option in ContextQuestionOptions.Parse(answer.Question.OptionsJson))
+                        {
+                            <option value="@option">@option</option>
+                        }
+                    </select>
+                }
                 else
                 {
                     <div class="form-check form-switch">
@@ -176,7 +186,7 @@ else
         {
             <span class="small text-muted">📚 Uses a knowledge source</span>
         }
-        @if (_helper.AllowContext || _helper.ContextQuestions.Count > 0)
+        @if (_helper.ContextQuestions.Count > 0)
         {
             <span class="small text-muted">💬 Supports conversation context</span>
         }
@@ -434,6 +444,7 @@ else
     {
         ContextQuestionType.Text => !string.IsNullOrWhiteSpace(a.Text),
         ContextQuestionType.Document => a.Document is not null,
+        ContextQuestionType.Select => !string.IsNullOrWhiteSpace(a.Text),
         _ => true
     });
     private string? _attachmentError;
@@ -572,8 +583,6 @@ else
             OutputFormat = _helper.OutputFormat,
             TargetAudience = _helper.TargetAudience,
             SpecialInstructions = _helper.SpecialInstructions,
-            AllowContext = _helper.AllowContext,
-            ContextPrompt = _helper.ContextPrompt,
             ContextQuestionsIntro = _helper.ContextQuestionsIntro,
             HasKnowledge = _helper.HasKnowledge,
             KnowledgeData = _helper.KnowledgeData,
@@ -587,6 +596,7 @@ else
                 Type = q.Type,
                 IsMandatory = q.IsMandatory,
                 UsageInstruction = q.UsageInstruction,
+                OptionsJson = q.OptionsJson,
                 SortOrder = q.SortOrder
             })]
         };

@@ -180,6 +180,7 @@ static async Task MigrateHelperDefinitionsAsync(SqlConnection source, AppDbConte
 
     var added = 0;
     var droppedRefs = 0;
+    var contextQuestionsSynthesized = 0;
     while (await reader.ReadAsync())
     {
         var id = reader.GetInt32(0);
@@ -194,7 +195,7 @@ static async Task MigrateHelperDefinitionsAsync(SqlConnection source, AppDbConte
         int? styleId = reader.IsDBNull(17) ? null : reader.GetInt32(17);
         if (styleId is not null && !validStyleIds.Contains(styleId.Value)) { styleId = null; droppedRefs++; }
 
-        target.HelperDefinitions.Add(new HelperDefinition
+        var helper = new HelperDefinition
         {
             Id = id,
             Name = reader.IsDBNull(1) ? $"Helper {id}" : reader.GetString(1),
@@ -214,8 +215,6 @@ static async Task MigrateHelperDefinitionsAsync(SqlConnection source, AppDbConte
             Scope = (!reader.IsDBNull(15) && reader.GetString(15) == "G") ? HelperScope.General : HelperScope.Personal,
             HelperCategoryId = categoryId,
             DefaultStylesheetId = styleId,
-            AllowContext = !reader.IsDBNull(18) && reader.GetBoolean(18),
-            ContextPrompt = reader.IsDBNull(19) ? null : reader.GetString(19),
             // V1 only had reasoning on/off (no levels) - map "on" to Medium as a reasonable default.
             Effort = (!reader.IsDBNull(20) && reader.GetBoolean(20)) ? EffortLevel.Medium : null,
             HasKnowledge = !reader.IsDBNull(22) && reader.GetBoolean(22),
@@ -224,13 +223,43 @@ static async Task MigrateHelperDefinitionsAsync(SqlConnection source, AppDbConte
             KnowledgePrompt = reader.IsDBNull(25) ? null : reader.GetString(25),
             IsExternal = !reader.IsDBNull(26) && reader.GetBoolean(26),
             ExternalUrl = reader.IsDBNull(27) ? null : reader.GetString(27)
-        });
+        };
+
+        // V2's AllowContext/ContextPrompt columns were retired in favour of the richer
+        // HelperContextQuestion list - V1's pairing (a bit that turns on a second, always-optional
+        // upload control, plus a prompt shown as guidance text above it - see the GovService form
+        // definition) maps onto exactly one Document-type question. ContextPrompt is what V1
+        // actually showed the user (guidance text above the upload control), so it becomes the
+        // question's Label - not UsageInstruction, which is model-facing only and would leave the
+        // run page showing a generic label instead of V1's real wording. Corrected 2026-09-02
+        // (initial version got this backwards - see
+        // 20260902125951_AddSelectContextQuestionsRetireAllowContext's own updated comment and
+        // its WidenContextQuestionLabelFixV1PromptMapping follow-up, which fixed the rows already
+        // migrated to V2 by that point). Label is 1024 chars, same as ContextPrompt was
+        // effectively capped at by UsageInstruction's old limit - some real V1 prompts run to
+        // ~350 characters, well past a typical short question label.
+        var allowContext = !reader.IsDBNull(18) && reader.GetBoolean(18);
+        var contextPrompt = reader.IsDBNull(19) ? null : reader.GetString(19);
+        if (allowContext && !string.IsNullOrWhiteSpace(contextPrompt))
+        {
+            helper.ContextQuestions.Add(new HelperContextQuestion
+            {
+                Label = contextPrompt.Trim() is { Length: > 1024 } trimmed ? trimmed[..1024] : contextPrompt.Trim(),
+                Type = ContextQuestionType.Document,
+                IsMandatory = false,
+                SortOrder = 0
+            });
+            contextQuestionsSynthesized++;
+        }
+
+        target.HelperDefinitions.Add(helper);
         added++;
     }
     await reader.CloseAsync();
 
     if (!dryRun) await SaveWithIdentityInsertAsync(target, "HelperDefinitions");
-    Console.WriteLine($"HelperDefinitions: {added} added, {existing.Count} already present, {droppedRefs} dangling reference(s) nulled out.");
+    Console.WriteLine($"HelperDefinitions: {added} added, {existing.Count} already present, " +
+        $"{droppedRefs} dangling reference(s) nulled out, {contextQuestionsSynthesized} context question(s) synthesized from AllowContext/ContextPrompt.");
 }
 
 static ModelResidency MapResidency(string code) => code switch

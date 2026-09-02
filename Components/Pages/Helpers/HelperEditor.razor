@@ -271,20 +271,6 @@ else
         {
             <div class="d-flex flex-column gap-3">
                 <div>
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="allowContext" checked="@_allowContext"
-                               @onchange="e => _allowContext = (bool)e.Value!" />
-                        <label class="form-check-label" for="allowContext">Show a "supports additional context" indicator on the run page</label>
-                    </div>
-                    <p class="text-muted small mb-0 mt-1">
-                        Informational only for now - not yet wired to a real input. Use the context
-                        questions below for an actual working "extra document/answer" prompt.
-                    </p>
-                </div>
-
-                <hr class="my-1" />
-
-                <div>
                     <h6 class="mb-1">Context questions</h6>
                     <p class="text-muted small mb-2">
                         Ask the user for specific extra information before running - e.g. "Which portfolio
@@ -317,6 +303,7 @@ else
                                         <option value="@ContextQuestionType.Text">Free text</option>
                                         <option value="@ContextQuestionType.Document">Document upload</option>
                                         <option value="@ContextQuestionType.Boolean">Yes / No</option>
+                                        <option value="@ContextQuestionType.Select">Choose from list</option>
                                     </select>
                                 </div>
                                 <div class="col-md-2">
@@ -334,6 +321,15 @@ else
                                     <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => _contextQuestions.RemoveAt(index)" title="Remove">✕</button>
                                 </div>
                             </div>
+                            @if (q.Type == ContextQuestionType.Select)
+                            {
+                                <div class="mt-2">
+                                    <label class="form-label small mb-1">Options (one per line)</label>
+                                    <textarea class="form-control form-control-sm" rows="3" value="@q.OptionsText"
+                                              placeholder="@("Option A\nOption B\nOption C")"
+                                              @oninput="e => q.OptionsText = e.Value?.ToString() ?? string.Empty"></textarea>
+                                </div>
+                            }
                             <div class="mt-2">
                                 <label class="form-label small mb-1">How should the Helper use this? (optional)</label>
                                 <input class="form-control form-control-sm" maxlength="1024" value="@q.UsageInstruction"
@@ -454,6 +450,16 @@ else
                                             <div class="text-danger small">@q.PreviewDocumentError</div>
                                         }
                                     }
+                                    else if (q.Type == ContextQuestionType.Select)
+                                    {
+                                        <select class="form-select form-select-sm" @bind="q.PreviewText">
+                                            <option value="">Choose…</option>
+                                            @foreach (var option in ContextQuestionOptions.ParseLines(q.OptionsText))
+                                            {
+                                                <option value="@option">@option</option>
+                                            }
+                                        </select>
+                                    }
                                     else
                                     {
                                         <div class="form-check form-switch">
@@ -535,8 +541,6 @@ else
 
     private static readonly HashSet<string> TextKnowledgeFormats = ["txt", "md", "csv", "html", "htm", "vtt", "json"];
     private bool IsTextKnowledgeFormat => _knowledgeFileType is not null && TextKnowledgeFormats.Contains(_knowledgeFileType);
-
-    private bool _allowContext;
     private List<QuestionDraft> _contextQuestions = [];
     private string _contextQuestionsIntro = "";
 
@@ -547,6 +551,11 @@ else
         public ContextQuestionType Type { get; set; } = ContextQuestionType.Text;
         public bool IsMandatory { get; set; }
         public string UsageInstruction { get; set; } = "";
+
+        /// <summary>Only meaningful when Type is Select - one option per line, as typed by the
+        /// editor; parsed/serialized to OptionsJson only at save time (see
+        /// ContextQuestionOptions).</summary>
+        public string OptionsText { get; set; } = "";
 
         // Preview-only scratch state - answers typed into the preview pane while testing this
         // draft question, never persisted (SaveAsync never reads these).
@@ -634,7 +643,6 @@ else
         _knowledgeFileType = h.KnowledgeFileType;
         _knowledgePrompt = h.KnowledgePrompt ?? "";
 
-        _allowContext = h.AllowContext;
         _contextQuestions = h.ContextQuestions
             .OrderBy(q => q.SortOrder)
             .Select(q => new QuestionDraft
@@ -643,7 +651,8 @@ else
                 Label = q.Label,
                 Type = q.Type,
                 IsMandatory = q.IsMandatory,
-                UsageInstruction = q.UsageInstruction ?? ""
+                UsageInstruction = q.UsageInstruction ?? "",
+                OptionsText = string.Join('\n', ContextQuestionOptions.Parse(q.OptionsJson))
             })
             .ToList();
         _contextQuestionsIntro = h.ContextQuestionsIntro ?? "";
@@ -839,7 +848,6 @@ else
         KnowledgeData = _hasKnowledge ? _knowledgeData : null,
         KnowledgeFileType = _hasKnowledge ? _knowledgeFileType : null,
         KnowledgePrompt = _hasKnowledge ? NullIfBlank(_knowledgePrompt) : null,
-        AllowContext = _allowContext,
         ContextQuestionsIntro = NullIfBlank(_contextQuestionsIntro),
         DefaultStylesheetId = ParseIntOrNull(_stylesheetId),
         OutputSchemaJson = NullIfBlank(_outputSchemaJson),
@@ -950,7 +958,6 @@ else
         entity.KnowledgeFileType = entity.HasKnowledge ? _knowledgeFileType : null;
         entity.KnowledgePrompt = entity.HasKnowledge ? NullIfBlank(_knowledgePrompt) : null;
 
-        entity.AllowContext = _allowContext;
         entity.ContextQuestionsIntro = NullIfBlank(_contextQuestionsIntro);
 
         // Blank-labelled draft rows (e.g. "+ Add question" clicked but never filled in) are
@@ -971,6 +978,9 @@ else
                 existingQuestion.Type = draft.Type;
                 existingQuestion.IsMandatory = draft.IsMandatory;
                 existingQuestion.UsageInstruction = NullIfBlank(draft.UsageInstruction);
+                existingQuestion.OptionsJson = draft.Type == ContextQuestionType.Select
+                    ? ContextQuestionOptions.Serialize(ContextQuestionOptions.ParseLines(draft.OptionsText))
+                    : null;
                 existingQuestion.SortOrder = i;
             }
             else
@@ -981,6 +991,9 @@ else
                     Type = draft.Type,
                     IsMandatory = draft.IsMandatory,
                     UsageInstruction = NullIfBlank(draft.UsageInstruction),
+                    OptionsJson = draft.Type == ContextQuestionType.Select
+                        ? ContextQuestionOptions.Serialize(ContextQuestionOptions.ParseLines(draft.OptionsText))
+                        : null,
                     SortOrder = i
                 });
             }

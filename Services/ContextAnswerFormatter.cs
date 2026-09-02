@@ -21,7 +21,7 @@ public static class ContextAnswerFormatter
         {
             var instruction = string.IsNullOrWhiteSpace(answer.UsageInstruction) ? null : answer.UsageInstruction;
 
-            if (answer.Type == ContextQuestionType.Text && !string.IsNullOrWhiteSpace(answer.Text))
+            if ((answer.Type == ContextQuestionType.Text || answer.Type == ContextQuestionType.Select) && !string.IsNullOrWhiteSpace(answer.Text))
             {
                 contextParts.Add(instruction is null
                     ? $"{answer.Label}: {answer.Text}"

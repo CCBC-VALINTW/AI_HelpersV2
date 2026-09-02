@@ -49,9 +49,6 @@ public class HelperDefinition
     public int? DefaultStylesheetId { get; set; }
     public Stylesheet? DefaultStylesheet { get; set; }
 
-    public bool AllowContext { get; set; }
-    public string? ContextPrompt { get; set; }
-
     /// <summary>Helper-specific questions asked of the user before running, in SortOrder.</summary>
     public ICollection<HelperContextQuestion> ContextQuestions { get; set; } = [];
 

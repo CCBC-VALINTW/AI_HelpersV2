@@ -4,5 +4,6 @@ public enum ContextQuestionType
 {
     Text,
     Document,
-    Boolean
+    Boolean,
+    Select
 }

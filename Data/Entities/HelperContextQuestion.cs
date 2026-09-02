@@ -23,6 +23,13 @@ public class HelperContextQuestion
     /// alongside it at run time - e.g. "Use this to determine who signs off the report."</summary>
     public string? UsageInstruction { get; set; }
 
+    /// <summary>Only meaningful when Type is Select - the picklist, as a JSON string array (e.g.
+    /// ["Option A","Option B"]). A plain JSON column rather than a child table, matching this
+    /// app's existing convention for small, always-loaded-with-the-parent lists (see
+    /// PersonalityPrompt.AnswersJson) - nothing here ever needs to be queried independently of its
+    /// question.</summary>
+    public string? OptionsJson { get; set; }
+
     /// <summary>Display/collection order - questions are asked in this order.</summary>
     public int SortOrder { get; set; }
 }

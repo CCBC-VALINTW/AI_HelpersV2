@@ -65,7 +65,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(p => p.AdherenceAdjustmentAllowance).HasPrecision(8, 5);
             e.Property(p => p.OwnerEmail).HasMaxLength(256);
             e.Property(p => p.Scope).HasConversion<string>().HasMaxLength(10);
-            e.Property(p => p.ContextPrompt).HasMaxLength(2048);
             e.Property(p => p.ContextQuestionsIntro).HasMaxLength(1024);
             e.Property(p => p.KnowledgeFileType).HasMaxLength(10);
             e.Property(p => p.ExternalUrl).HasMaxLength(512);
@@ -95,6 +94,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(p => p.Label).HasMaxLength(256).IsRequired();
             e.Property(p => p.Type).HasConversion<string>().HasMaxLength(10);
             e.Property(p => p.UsageInstruction).HasMaxLength(1024);
+            e.Property(p => p.OptionsJson).HasMaxLength(4000);
 
             // Questions belong to their Helper and have no independent meaning - cascade, unlike
             // AccountingEntry/CallbackEntry/Feedback above which deliberately SetNull to preserve
