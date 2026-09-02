@@ -56,6 +56,12 @@ public class HelperDefinition
     /// why they're being asked - e.g. "This helps me build you a fully rounded report from the outset."</summary>
     public string? ContextQuestionsIntro { get; set; }
 
+    /// <summary>When true, the run page hides the general input editor, attachment picker, and web
+    /// URL field entirely - the whole call is built purely from ContextQuestions answers. Meant
+    /// for a Helper with a tightly-scoped, predictable input shape (e.g. "always exactly these
+    /// three fields"), where free-form input would only invite noise.</summary>
+    public bool IsContextDriven { get; set; }
+
     public bool HasKnowledge { get; set; }
     public string? KnowledgeData { get; set; }
     public string? KnowledgeFileType { get; set; }

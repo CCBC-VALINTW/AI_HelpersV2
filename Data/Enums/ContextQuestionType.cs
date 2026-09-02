@@ -5,5 +5,6 @@ public enum ContextQuestionType
     Text,
     Document,
     Boolean,
-    Select
+    Select,
+    WebUrl
 }

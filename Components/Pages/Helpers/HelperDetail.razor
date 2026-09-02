@@ -88,6 +88,25 @@ else
                         }
                     </select>
                 }
+                else if (answer.Question.Type == ContextQuestionType.WebUrl)
+                {
+                    <div class="d-flex gap-2">
+                        <input class="form-control form-control-sm" placeholder="https://…"
+                               value="@answer.UrlInput" @oninput="e => answer.UrlInput = e.Value?.ToString() ?? string.Empty" />
+                        <button type="button" class="btn btn-outline-secondary btn-sm text-nowrap" @onclick="() => OnContextUrlFetch(answer)"
+                                disabled="@(answer.FetchingUrl || string.IsNullOrWhiteSpace(answer.UrlInput))">
+                            @(answer.FetchingUrl ? "Fetching…" : "Add")
+                        </button>
+                    </div>
+                    @if (answer.Document is not null)
+                    {
+                        <span class="text-muted small">@answer.Document.Name fetched.</span>
+                    }
+                    @if (answer.Error is not null)
+                    {
+                        <div class="text-danger small">@answer.Error</div>
+                    }
+                }
                 else
                 {
                     <div class="form-check form-switch">
@@ -226,14 +245,14 @@ else
             <div class="card mb-4">
                 <div class="card-header d-flex align-items-center justify-content-between">
                     <span>Run this Helper</span>
-                    @if (_output is not null)
+                    @if (_output is not null && !_helper.IsContextDriven)
                     {
                         <button type="button" class="btn btn-link btn-sm p-0" @onclick="ToggleInputCollapsed">
                             @(_inputCollapsed ? "Show / edit ▾" : "Hide ▴")
                         </button>
                     }
                 </div>
-                @if (_inputCollapsed)
+                @if (_inputCollapsed && !_helper.IsContextDriven)
                 {
                     <div class="card-body py-2">
                         <p class="text-muted small mb-0 fst-italic">@InputPreview()</p>
@@ -242,45 +261,55 @@ else
                 else
                 {
                     <div class="card-body">
-                        <label class="form-label" for="helperInput">Your input</label>
-                        <textarea id="helperInput" @ref="_inputRef" class="mb-3 helper-input-editor"></textarea>
-
-                        @if (_helper.LlmDefinition is { } model && (model.SupportsDocument || model.SupportsImage))
+                        @if (_helper.IsContextDriven)
                         {
-                            <div class="mb-3">
-                                <label class="form-label small text-muted mb-1" for="attachmentInput">Attach files (optional)</label>
-                                <InputFile id="attachmentInput" OnChange="OnFilesSelected" multiple accept="@AttachmentAccept(model)" class="form-control form-control-sm" />
-                                @if (_attachmentError is not null)
-                                {
-                                    <div class="text-danger small mt-1">@_attachmentError</div>
-                                }
-                                @if (_attachments.Count > 0)
-                                {
-                                    <div class="d-flex flex-wrap gap-2 mt-2">
-                                        @foreach (var attachment in _attachments)
-                                        {
-                                            <span class="badge text-bg-light border d-flex align-items-center gap-2">
-                                                @attachment.Name
-                                                <button type="button" class="btn-close" style="font-size: 0.6rem;" aria-label="Remove attachment" @onclick="() => RemoveAttachment(attachment)"></button>
-                                            </span>
-                                        }
-                                    </div>
-                                }
-                            </div>
+                            <p class="text-muted small mb-0">
+                                This Helper is fully driven by the context questions below - there's no general
+                                input here, just complete them and click Run.
+                            </p>
+                        }
+                        else
+                        {
+                            <label class="form-label" for="helperInput">Your input</label>
+                            <textarea id="helperInput" @ref="_inputRef" class="mb-3 helper-input-editor"></textarea>
 
-                            @if (model.SupportsDocument)
+                            @if (_helper.LlmDefinition is { } model && (model.SupportsDocument || model.SupportsImage))
                             {
                                 <div class="mb-3">
-                                    <label class="form-label small text-muted mb-1" for="urlInput">Add content from a web page (optional)</label>
-                                    <div class="d-flex gap-2">
-                                        <input id="urlInput" class="form-control form-control-sm" placeholder="https://…"
-                                               value="@_urlInput" @oninput="e => _urlInput = e.Value?.ToString() ?? string.Empty" />
-                                        <button type="button" class="btn btn-outline-secondary btn-sm text-nowrap" @onclick="AddUrlAttachment"
-                                                disabled="@(_fetchingUrl || string.IsNullOrWhiteSpace(_urlInput))">
-                                            @(_fetchingUrl ? "Fetching…" : "Add")
-                                        </button>
-                                    </div>
+                                    <label class="form-label small text-muted mb-1" for="attachmentInput">Attach files (optional)</label>
+                                    <InputFile id="attachmentInput" OnChange="OnFilesSelected" multiple accept="@AttachmentAccept(model)" class="form-control form-control-sm" />
+                                    @if (_attachmentError is not null)
+                                    {
+                                        <div class="text-danger small mt-1">@_attachmentError</div>
+                                    }
+                                    @if (_attachments.Count > 0)
+                                    {
+                                        <div class="d-flex flex-wrap gap-2 mt-2">
+                                            @foreach (var attachment in _attachments)
+                                            {
+                                                <span class="badge text-bg-light border d-flex align-items-center gap-2">
+                                                    @attachment.Name
+                                                    <button type="button" class="btn-close" style="font-size: 0.6rem;" aria-label="Remove attachment" @onclick="() => RemoveAttachment(attachment)"></button>
+                                                </span>
+                                            }
+                                        </div>
+                                    }
                                 </div>
+
+                                @if (model.SupportsDocument)
+                                {
+                                    <div class="mb-3">
+                                        <label class="form-label small text-muted mb-1" for="urlInput">Add content from a web page (optional)</label>
+                                        <div class="d-flex gap-2">
+                                            <input id="urlInput" class="form-control form-control-sm" placeholder="https://…"
+                                                   value="@_urlInput" @oninput="e => _urlInput = e.Value?.ToString() ?? string.Empty" />
+                                            <button type="button" class="btn btn-outline-secondary btn-sm text-nowrap" @onclick="AddUrlAttachment"
+                                                    disabled="@(_fetchingUrl || string.IsNullOrWhiteSpace(_urlInput))">
+                                                @(_fetchingUrl ? "Fetching…" : "Add")
+                                            </button>
+                                        </div>
+                                    </div>
+                                }
                             }
                         }
 
@@ -370,7 +399,7 @@ else
                                       @bind="_tweakInput" disabled="@_running"></textarea>
                         }
                         <button type="button" class="btn btn-primary btn-sm w-100" @onclick="RunOrRefine"
-                                disabled="@(_running || !ContextAnswersValid || !AttachmentTotalsWithinLimits())">
+                                disabled="@(_running || !ContextAnswersValid || !AttachmentTotalsWithinLimits() || ContextDrivenNeedsAnswer)">
                             @(_output is null
                                 ? (_running ? "Running…" : "Run")
                                 : (_running ? "Refining…" : "Refine"))
@@ -378,6 +407,10 @@ else
                         @if (_output is null && !ContextAnswersValid)
                         {
                             <p class="text-danger small mb-0 mt-1">Please answer all required questions above before running.</p>
+                        }
+                        @if (ContextDrivenNeedsAnswer)
+                        {
+                            <p class="text-danger small mb-0 mt-1">This Helper is fully context-driven - answer at least one question above before running.</p>
                         }
                         @if (!AttachmentTotalsWithinLimits())
                         {
@@ -440,17 +473,43 @@ else
         public Attachment? Document { get; set; }
         public bool BoolValue { get; set; }
         public string? Error { get; set; }
+
+        // WebUrl-only scratch state - the URL typed into this question's own field before it's
+        // fetched. Kept per-answer (not a single shared field, unlike the main input's _urlInput)
+        // since a Helper can have several WebUrl questions open on the page at once.
+        public string UrlInput { get; set; } = "";
+        public bool FetchingUrl { get; set; }
     }
 
     // A Boolean answer is always in a definite Yes/No state (never "blank"), so Mandatory has
-    // nothing extra to enforce there - only Text/Document can be left unanswered.
+    // nothing extra to enforce there - only Text/Document/WebUrl/Select can be left unanswered.
     private bool ContextAnswersValid => _contextAnswers.All(a => !a.Question.IsMandatory || a.Question.Type switch
     {
         ContextQuestionType.Text => !string.IsNullOrWhiteSpace(a.Text),
-        ContextQuestionType.Document => a.Document is not null,
+        ContextQuestionType.Document or ContextQuestionType.WebUrl => a.Document is not null,
         ContextQuestionType.Select => !string.IsNullOrWhiteSpace(a.Text),
         _ => true
     });
+
+    /// <summary>An IsContextDriven Helper has no other source of input at all - unlike a normal
+    /// Helper, it can't fall back on typed text or an attachment from the main picker (neither
+    /// exists here), so ContextAnswersValid alone isn't enough: that only enforces questions
+    /// explicitly marked Mandatory, and every question here could legitimately be optional.
+    /// Without this, a run with literally nothing answered sends Bedrock a genuinely empty text
+    /// content block with no attachments either, which it rejects outright - a real bug hit live,
+    /// not a hypothetical. Mirrors ContextAnswerFormatter's own "does this answer produce
+    /// anything" rules per type, since that's what actually determines whether the call ends up
+    /// non-empty (a Document/WebUrl answer only requires HAVING a file - if its own
+    /// UsageInstruction is blank, BedrockAdapter's separate "attachment but no text" fallback
+    /// still covers that case).</summary>
+    private bool ContextDrivenNeedsAnswer => _helper is { IsContextDriven: true } && !_contextAnswers.Any(a => a.Question.Type switch
+    {
+        ContextQuestionType.Text or ContextQuestionType.Select => !string.IsNullOrWhiteSpace(a.Text),
+        ContextQuestionType.Document or ContextQuestionType.WebUrl => a.Document is not null,
+        ContextQuestionType.Boolean => true,
+        _ => false
+    });
+
     private string? _attachmentError;
     private string _urlInput = "";
     private bool _fetchingUrl;
@@ -640,6 +699,7 @@ else
             TargetAudience = _helper.TargetAudience,
             SpecialInstructions = _helper.SpecialInstructions,
             ContextQuestionsIntro = _helper.ContextQuestionsIntro,
+            IsContextDriven = _helper.IsContextDriven,
             HasKnowledge = _helper.HasKnowledge,
             KnowledgeData = _helper.KnowledgeData,
             KnowledgeFileType = _helper.KnowledgeFileType,
@@ -792,13 +852,22 @@ else
         // Bedrock with a combined attachment count it will just reject outright.
         if (!AttachmentTotalsWithinLimits()) return;
 
+        // Same reasoning - without this, an IsContextDriven Helper run with nothing answered
+        // reaches Bedrock with a genuinely empty text block and no attachments to trigger
+        // BedrockAdapter's own "no text but has files" fallback either, and gets rejected outright
+        // (a real bug hit live, not a hypothetical).
+        if (ContextDrivenNeedsAnswer) return;
+
         // If the input card is currently expanded (either the first run, or the user re-opened it
         // to edit ahead of a refine), the TinyMCE editor - not _lastInput - holds the live truth.
         // Must happen BEFORE the tweak fold-in below, not after - real bug this was fixed from:
         // folding the tweak into _lastInput first and THEN overwriting _lastInput from the editor
         // silently discarded whatever had just been typed into the tweak box, any time the main
         // input card also happened to be expanded.
-        if (!_inputCollapsed && !_helper.IsExternal)
+        // IsContextDriven Helpers never have an "input" editor to read from - _lastInput just
+        // stays "" throughout, and BuildEffectiveInput's context block below carries the whole
+        // call instead.
+        if (!_inputCollapsed && !_helper.IsExternal && !_helper.IsContextDriven)
         {
             var inputModule = await GetModuleAsync();
             var rawInput = await inputModule.InvokeAsync<string>("getHtml", "input");
@@ -1205,6 +1274,45 @@ else
         _urlInput = "";
     }
 
+    /// <summary>The WebUrl context-question equivalent of AddUrlAttachment above - same
+    /// UrlFetchService call and same "always a document" reasoning, just writing into this one
+    /// question's own answer.Document instead of the shared _attachments list.</summary>
+    private async Task OnContextUrlFetch(ContextAnswerState answer)
+    {
+        answer.Error = null;
+        var url = answer.UrlInput.Trim();
+        if (string.IsNullOrWhiteSpace(url)) return;
+
+        // answer.Document isn't cleared here (unlike OnContextFileSelected) until the fetch
+        // actually succeeds - a failed re-fetch shouldn't discard a previously-fetched page.
+        var (docs, _) = CurrentAttachmentTotals();
+        if (answer.Document is null && docs >= MaxDocumentAttachments)
+        {
+            answer.Error = $"This run already has the maximum of {MaxDocumentAttachments} documents (including any Knowledge document and other uploads) - a URL fetch always counts as a document.";
+            return;
+        }
+
+        answer.FetchingUrl = true;
+        StateHasChanged();
+
+        var result = await UrlFetch.FetchAsync(url, MaxDocumentBytes);
+
+        answer.FetchingUrl = false;
+
+        if (!result.Success || result.Bytes is null || result.Format is null)
+        {
+            answer.Error = result.ErrorMessage ?? "Couldn't fetch that URL.";
+            return;
+        }
+
+        var displayName = Uri.TryCreate(result.FinalUrl, UriKind.Absolute, out var finalUri)
+            ? finalUri.GetLeftPart(UriPartial.Path)
+            : url;
+
+        answer.Document = new Attachment { Name = displayName, Kind = AttachmentKind.Document, Format = result.Format, Bytes = result.Bytes };
+        answer.UrlInput = "";
+    }
+
     private static string AttachmentAccept(Data.Entities.LlmDefinition model)
     {
         var parts = new List<string>();
@@ -1216,7 +1324,11 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (_inputEditorNeedsInit && _helper is { IsExternal: false })
+        // IsContextDriven Helpers never render the "Your input" textarea at all (see the
+        // Run this Helper card above) - guarded at this single point, rather than every place
+        // _inputEditorNeedsInit gets set true, so there's no risk of ever creating an editor
+        // against an ElementReference that was never actually rendered.
+        if (_inputEditorNeedsInit && _helper is { IsExternal: false, IsContextDriven: false })
         {
             _inputEditorNeedsInit = false;
             var module = await GetModuleAsync();

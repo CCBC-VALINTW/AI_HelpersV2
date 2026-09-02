@@ -27,9 +27,15 @@ public static class ContextAnswerFormatter
                     ? $"{answer.Label}: {answer.Text}"
                     : $"{answer.Label}: {answer.Text} ({instruction})");
             }
-            else if (answer.Type == ContextQuestionType.Document && answer.Document is not null && instruction is not null)
+            else if ((answer.Type == ContextQuestionType.Document || answer.Type == ContextQuestionType.WebUrl) &&
+                answer.Document is not null && instruction is not null)
             {
-                contextParts.Add($"Regarding the attached document \"{answer.Document.Name}\" ({answer.Label}): {instruction}");
+                // WebUrl answers arrive as the exact same kind of Attachment as a Document answer
+                // (see HelperDetail.razor's OnContextUrlFetch, which reuses UrlFetchService the
+                // same way the main input's own URL field does) - only the wording differs, since
+                // "attached document" would misdescribe a fetched web page.
+                var noun = answer.Type == ContextQuestionType.WebUrl ? "fetched page" : "attached document";
+                contextParts.Add($"Regarding the {noun} \"{answer.Document.Name}\" ({answer.Label}): {instruction}");
             }
             else if (answer.Type == ContextQuestionType.Boolean)
             {

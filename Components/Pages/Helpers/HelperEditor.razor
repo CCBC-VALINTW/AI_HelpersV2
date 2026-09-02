@@ -10,6 +10,7 @@
 @inject AppDbContext Db
 @inject ICurrentUserService CurrentUser
 @inject IHelperInvocationService Invocation
+@inject IUrlFetchService UrlFetch
 @inject NavigationManager Nav
 
 <PageTitle>@(Id is null ? "New Helper" : "Edit Helper")</PageTitle>
@@ -271,6 +272,22 @@ else
         {
             <div class="d-flex flex-column gap-3">
                 <div>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="isContextDriven" checked="@_isContextDriven"
+                               @onchange="e => _isContextDriven = (bool)e.Value!" />
+                        <label class="form-check-label" for="isContextDriven">Is this a fully context-driven Helper?</label>
+                    </div>
+                    <p class="text-muted small mb-0 mt-1">
+                        When on, the run page drops the general input box, file upload, and web-URL fields
+                        entirely - the user only ever sees and answers the context questions below, giving a
+                        tightly scoped input instead of free-form text. Make sure the questions below actually
+                        cover everything this Helper needs, since there's no other way in.
+                    </p>
+                </div>
+
+                <hr class="my-1" />
+
+                <div>
                     <h6 class="mb-1">Context questions</h6>
                     <p class="text-muted small mb-2">
                         Ask the user for specific extra information before running - e.g. "Which portfolio
@@ -304,6 +321,7 @@ else
                                         <option value="@ContextQuestionType.Document">Document upload</option>
                                         <option value="@ContextQuestionType.Boolean">Yes / No</option>
                                         <option value="@ContextQuestionType.Select">Choose from list</option>
+                                        <option value="@ContextQuestionType.WebUrl">Web URL</option>
                                     </select>
                                 </div>
                                 <div class="col-md-2">
@@ -343,9 +361,9 @@ else
                     @if (DocumentQuestionCount > MaxDocumentContextQuestions)
                     {
                         <p class="text-danger small mb-0 mt-2">
-                            @DocumentQuestionCount document-upload questions - Bedrock only accepts @MaxDocumentContextQuestions documents
-                            per run, so at most @MaxDocumentContextQuestions are allowed here (a run may also add the Helper's own Knowledge
-                            document). Change some to another answer type before saving.
+                            @DocumentQuestionCount document-upload/web-URL questions - Bedrock only accepts @MaxDocumentContextQuestions documents
+                            per run, so at most @MaxDocumentContextQuestions of these are allowed here (a run may also add the Helper's own
+                            Knowledge document). Change some to another answer type before saving.
                         </p>
                     }
                 </div>
@@ -421,17 +439,19 @@ else
                 else
                 {
                     <p class="text-muted small mb-0">
-                        Paste a short, realistic sample of input to see how this Helper responds to your
-                        current (unsaved edits included) configuration. Each preview is a real call to the
-                        model and counts against your monthly spend, so use it deliberately rather than on
-                        every keystroke.
+                        @(_isContextDriven
+                            ? "This Helper is fully context-driven - there's no general input to sample, just answer the context questions below and preview. Each preview is a real call to the model and counts against your monthly spend, so use it deliberately rather than on every keystroke."
+                            : "Paste a short, realistic sample of input to see how this Helper responds to your current (unsaved edits included) configuration. Each preview is a real call to the model and counts against your monthly spend, so use it deliberately rather than on every keystroke.")
                     </p>
 
-                    <div>
-                        <label class="form-label small mb-1" for="previewInput">Sample input</label>
-                        <textarea id="previewInput" class="form-control form-control-sm" rows="4" value="@_previewInput"
-                                  @oninput="e => _previewInput = e.Value?.ToString() ?? string.Empty"></textarea>
-                    </div>
+                    @if (!_isContextDriven)
+                    {
+                        <div>
+                            <label class="form-label small mb-1" for="previewInput">Sample input</label>
+                            <textarea id="previewInput" class="form-control form-control-sm" rows="4" value="@_previewInput"
+                                      @oninput="e => _previewInput = e.Value?.ToString() ?? string.Empty"></textarea>
+                        </div>
+                    }
 
                     @if (PreviewQuestions.Count > 0)
                     {
@@ -468,6 +488,25 @@ else
                                             }
                                         </select>
                                     }
+                                    else if (q.Type == ContextQuestionType.WebUrl)
+                                    {
+                                        <div class="d-flex gap-2">
+                                            <input class="form-control form-control-sm" placeholder="https://…"
+                                                   value="@q.PreviewUrlInput" @oninput="e => q.PreviewUrlInput = e.Value?.ToString() ?? string.Empty" />
+                                            <button type="button" class="btn btn-outline-secondary btn-sm text-nowrap" @onclick="() => OnPreviewContextUrlFetch(q)"
+                                                    disabled="@(q.PreviewFetchingUrl || string.IsNullOrWhiteSpace(q.PreviewUrlInput))">
+                                                @(q.PreviewFetchingUrl ? "Fetching…" : "Add")
+                                            </button>
+                                        </div>
+                                        @if (q.PreviewDocument is not null)
+                                        {
+                                            <span class="text-muted small">@q.PreviewDocument.Name fetched.</span>
+                                        }
+                                        @if (q.PreviewDocumentError is not null)
+                                        {
+                                            <div class="text-danger small">@q.PreviewDocumentError</div>
+                                        }
+                                    }
                                     else
                                     {
                                         <div class="form-check form-switch">
@@ -481,9 +520,13 @@ else
                     }
 
                     <button type="button" class="btn btn-primary btn-sm" @onclick="RunPreviewAsync"
-                            disabled="@(_previewRunning || string.IsNullOrWhiteSpace(_previewInput))">
+                            disabled="@(_previewRunning || (!_isContextDriven && string.IsNullOrWhiteSpace(_previewInput)) || PreviewContextDrivenNeedsAnswer)">
                         @(_previewRunning ? "Running…" : "Run preview")
                     </button>
+                    @if (PreviewContextDrivenNeedsAnswer)
+                    {
+                        <p class="text-danger small mb-0">Answer at least one context question above before previewing.</p>
+                    }
 
                     @if (_previewError is not null)
                     {
@@ -551,6 +594,7 @@ else
     private bool IsTextKnowledgeFormat => _knowledgeFileType is not null && TextKnowledgeFormats.Contains(_knowledgeFileType);
     private List<QuestionDraft> _contextQuestions = [];
     private string _contextQuestionsIntro = "";
+    private bool _isContextDriven;
 
     private class QuestionDraft
     {
@@ -571,6 +615,8 @@ else
         public bool PreviewBool { get; set; }
         public Attachment? PreviewDocument { get; set; }
         public string? PreviewDocumentError { get; set; }
+        public string PreviewUrlInput { get; set; } = "";
+        public bool PreviewFetchingUrl { get; set; }
     }
 
     private string _previewInput = "";
@@ -580,14 +626,27 @@ else
 
     private List<QuestionDraft> PreviewQuestions => _contextQuestions.Where(q => !string.IsNullOrWhiteSpace(q.Label)).ToList();
 
+    /// <summary>Mirrors HelperDetail.razor's own ContextDrivenNeedsAnswer - an IsContextDriven
+    /// preview run with nothing answered hits the exact same "empty text, no attachments" Bedrock
+    /// rejection the real run page does, so the preview pane needs the same guard rather than
+    /// letting a wasted (and billed) call reach Bedrock only to fail.</summary>
+    private bool PreviewContextDrivenNeedsAnswer => _isContextDriven && !PreviewQuestions.Any(q => q.Type switch
+    {
+        ContextQuestionType.Text or ContextQuestionType.Select => !string.IsNullOrWhiteSpace(q.PreviewText),
+        ContextQuestionType.Document or ContextQuestionType.WebUrl => q.PreviewDocument is not null,
+        ContextQuestionType.Boolean => true,
+        _ => false
+    });
+
     // Bedrock's Converse API accepts at most 5 documents per request (see HelperDetail.razor's
-    // own limit constants) - each answered Document-type context question contributes one, on top
-    // of whatever the run page's own upload picker and the Helper's Knowledge document (if any)
-    // add. Capping the Helper's own configuration here is a config-time guardrail, not the full
-    // check - HelperDetail.razor still validates the real combined total at run time, since only
-    // it knows what a specific run actually attaches.
+    // own limit constants) - each answered Document or WebUrl question contributes one (a fetched
+    // web page is sent as a document attachment, same as an uploaded file - see
+    // ContextAnswerFormatter), on top of whatever the run page's own upload picker and the
+    // Helper's Knowledge document (if any) add. Capping the Helper's own configuration here is a
+    // config-time guardrail, not the full check - HelperDetail.razor still validates the real
+    // combined total at run time, since only it knows what a specific run actually attaches.
     private const int MaxDocumentContextQuestions = 5;
-    private int DocumentQuestionCount => PreviewQuestions.Count(q => q.Type == ContextQuestionType.Document);
+    private int DocumentQuestionCount => PreviewQuestions.Count(q => q.Type is ContextQuestionType.Document or ContextQuestionType.WebUrl);
 
     private string _stylesheetId = "";
     private string _outputSchemaJson = "";
@@ -673,6 +732,7 @@ else
             })
             .ToList();
         _contextQuestionsIntro = h.ContextQuestionsIntro ?? "";
+        _isContextDriven = h.IsContextDriven;
 
         _stylesheetId = h.DefaultStylesheetId?.ToString() ?? "";
         _outputSchemaJson = h.OutputSchemaJson ?? "";
@@ -838,6 +898,36 @@ else
         }
     }
 
+    /// <summary>The WebUrl preview equivalent of OnPreviewContextFileSelected above - same
+    /// UrlFetchService HelperDetail.razor's own context-question fetch uses, writing into this
+    /// draft's PreviewDocument instead of a real persisted answer.</summary>
+    private async Task OnPreviewContextUrlFetch(QuestionDraft question)
+    {
+        question.PreviewDocumentError = null;
+        var url = question.PreviewUrlInput.Trim();
+        if (string.IsNullOrWhiteSpace(url)) return;
+
+        question.PreviewFetchingUrl = true;
+        StateHasChanged();
+
+        var result = await UrlFetch.FetchAsync(url, MaxKnowledgeBytes);
+
+        question.PreviewFetchingUrl = false;
+
+        if (!result.Success || result.Bytes is null || result.Format is null)
+        {
+            question.PreviewDocumentError = result.ErrorMessage ?? "Couldn't fetch that URL.";
+            return;
+        }
+
+        var displayName = Uri.TryCreate(result.FinalUrl, UriKind.Absolute, out var finalUri)
+            ? finalUri.GetLeftPart(UriPartial.Path)
+            : url;
+
+        question.PreviewDocument = new Attachment { Name = displayName, Kind = AttachmentKind.Document, Format = result.Format, Bytes = result.Bytes };
+        question.PreviewUrlInput = "";
+    }
+
     /// <summary>
     /// Materialises the current (possibly unsaved) form fields into a real HelperDefinition for a
     /// test call - deliberately NOT re-read from the database, so a preview reflects whatever's
@@ -866,13 +956,16 @@ else
         KnowledgeFileType = _hasKnowledge ? _knowledgeFileType : null,
         KnowledgePrompt = _hasKnowledge ? NullIfBlank(_knowledgePrompt) : null,
         ContextQuestionsIntro = NullIfBlank(_contextQuestionsIntro),
+        IsContextDriven = _isContextDriven,
         DefaultStylesheetId = ParseIntOrNull(_stylesheetId),
         OutputSchemaJson = NullIfBlank(_outputSchemaJson),
     };
 
     private async Task RunPreviewAsync()
     {
-        if (Id is null || _isExternal || string.IsNullOrWhiteSpace(_previewInput)) return;
+        if (Id is null || _isExternal) return;
+        if (!_isContextDriven && string.IsNullOrWhiteSpace(_previewInput)) return;
+        if (PreviewContextDrivenNeedsAnswer) return;
 
         _previewRunning = true;
         _previewError = null;
@@ -882,10 +975,15 @@ else
         {
             var contextBlock = ContextAnswerFormatter.BuildContextBlock(PreviewQuestions.Select(q =>
                 new ContextAnswerFormatter.Answer(q.Label, q.Type, q.UsageInstruction, q.PreviewText, q.PreviewDocument, q.PreviewBool)));
-            var effectiveInput = contextBlock is null ? _previewInput : $"{contextBlock}\n\n{_previewInput}";
+            // IsContextDriven has no "sample input" to fold in at all - same shape as
+            // HelperDetail.razor's own ExecuteAsync, whose _lastInput likewise stays blank
+            // throughout for a context-driven run.
+            var effectiveInput = _isContextDriven
+                ? contextBlock ?? ""
+                : contextBlock is null ? _previewInput : $"{contextBlock}\n\n{_previewInput}";
 
             var attachments = PreviewQuestions
-                .Where(q => q.Type == ContextQuestionType.Document && q.PreviewDocument is not null)
+                .Where(q => (q.Type == ContextQuestionType.Document || q.Type == ContextQuestionType.WebUrl) && q.PreviewDocument is not null)
                 .Select(q => q.PreviewDocument!)
                 .ToList();
 
@@ -919,7 +1017,7 @@ else
 
         if (DocumentQuestionCount > MaxDocumentContextQuestions)
         {
-            _saveError = $"Too many document-upload context questions ({DocumentQuestionCount}) - Bedrock only accepts {MaxDocumentContextQuestions} documents per run, so at most {MaxDocumentContextQuestions} are allowed.";
+            _saveError = $"Too many document-upload/web-URL context questions ({DocumentQuestionCount}) - Bedrock only accepts {MaxDocumentContextQuestions} documents per run, so at most {MaxDocumentContextQuestions} of these are allowed.";
             return;
         }
 
@@ -982,6 +1080,7 @@ else
         entity.KnowledgePrompt = entity.HasKnowledge ? NullIfBlank(_knowledgePrompt) : null;
 
         entity.ContextQuestionsIntro = NullIfBlank(_contextQuestionsIntro);
+        entity.IsContextDriven = _isContextDriven;
 
         // Blank-labelled draft rows (e.g. "+ Add question" clicked but never filled in) are
         // dropped silently rather than blocking the save with a validation error.
@@ -1024,6 +1123,7 @@ else
 
         entity.DefaultStylesheetId = ParseIntOrNull(_stylesheetId);
         entity.OutputSchemaJson = NullIfBlank(_outputSchemaJson);
+        entity.LastModifiedAtUtc = DateTime.UtcNow;
 
         await Db.SaveChangesAsync();
 
