@@ -256,9 +256,29 @@ Real issues hit during the first deployment, kept here so the next one goes fast
 
 ## Redeploying / updating
 
-- Publish to an out-of-tree folder (see above), copy over the site's physical path, recycle the
-  app pool (or `iisreset`) to pick up the new binaries.
-- New NuGet packages (e.g. a merge that adds a dependency) need a real app pool recycle/restart —
-  don't rely on any kind of hot-reload in a deployed IIS instance.
-- New EF Core migrations need `dotnet ef database update` run against whichever DB that
-  environment points at before/after deploying the code that depends on them.
+**Use `scripts/Deploy-Release.ps1`** rather than doing this by hand — it wraps the steps below
+into one script with an explicit review-and-confirm gate before anything touches the shared DB
+or a live site:
+
+```powershell
+.\scripts\Deploy-Release.ps1 -SitePath 'C:\inetpub\wwwroot\AiHelpers' -AppPoolName '<pool name>'
+```
+
+Run without `-SitePath` to just generate + apply the DB migration and publish to an out-of-tree
+folder, printing the manual copy/recycle steps instead of guessing at a site layout. See the
+script's own `Get-Help .\scripts\Deploy-Release.ps1 -Full` for every parameter (target
+server/database, `-SkipMigration` for a code-only release, `-SkipPublish` for a DB-only one).
+
+What it does, and why, if working from first principles instead:
+
+- Generates the DB migration as a reviewable idempotent SQL script
+  (`dotnet ef migrations script --idempotent`) rather than running `dotnet ef database update`
+  directly against a DB real testers are using — gives you a chance to read exactly what's about
+  to run, and flags `DROP COLUMN`/`ALTER COLUMN`/`DROP TABLE`/`sp_rename` for a manual "does this
+  table have real rows I'd lose?" check (a migration that's harmless against an empty dev table
+  can genuinely lose data against one testers have been using).
+- Publishes to an out-of-tree folder (see above), verifies `Project Info`/`Design brief`/`Tools`
+  aren't in the output (the real incident above), then copies over the site's physical path and
+  recycles the app pool to pick up the new binaries.
+- New NuGet packages (e.g. a merge that adds a dependency) need a real app pool recycle/restart
+  either way — don't rely on any kind of hot-reload in a deployed IIS instance.
