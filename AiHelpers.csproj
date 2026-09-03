@@ -41,6 +41,11 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.11" />
     <PackageReference Include="Microsoft.Identity.Web" Version="4.14.2" />
     <PackageReference Include="Microsoft.Identity.Web.UI" Version="4.14.2" />
+    <!-- Data Connections feature (HelperDataQuery) - Microsoft's own generic ODBC provider, MIT
+         licensed. Chosen deliberately over a dialect-specific client (e.g. a SQL Server or
+         Redshift-specific package) so one connection type covers any target with an installed
+         ODBC driver on the host, matching this app's own real mix of SQL Server and AWS Redshift. -->
+    <PackageReference Include="System.Data.Odbc" Version="10.0.11" />
   </ItemGroup>
 
 </Project>

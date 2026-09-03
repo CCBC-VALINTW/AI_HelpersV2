@@ -62,6 +62,10 @@ public class HelperDefinition
     /// three fields"), where free-form input would only invite noise.</summary>
     public bool IsContextDriven { get; set; }
 
+    /// <summary>Live queries against external data sources, run automatically on every call - see
+    /// HelperDataQuery's own doc comment for why this isn't a context-question type.</summary>
+    public ICollection<HelperDataQuery> DataQueries { get; set; } = [];
+
     public bool HasKnowledge { get; set; }
     public string? KnowledgeData { get; set; }
     public string? KnowledgeFileType { get; set; }

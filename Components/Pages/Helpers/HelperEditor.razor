@@ -11,6 +11,7 @@
 @inject ICurrentUserService CurrentUser
 @inject IHelperInvocationService Invocation
 @inject IUrlFetchService UrlFetch
+@inject IDataQueryService DataQuery
 @inject NavigationManager Nav
 
 <PageTitle>@(Id is null ? "New Helper" : "Edit Helper")</PageTitle>
@@ -52,6 +53,9 @@ else
             </li>
             <li class="nav-item">
                 <button type="button" class="nav-link @(_activeTab == EditorTab.Context ? "active" : "")" @onclick="() => _activeTab = EditorTab.Context">Context</button>
+            </li>
+            <li class="nav-item">
+                <button type="button" class="nav-link @(_activeTab == EditorTab.DataSources ? "active" : "")" @onclick="() => _activeTab = EditorTab.DataSources">Data Sources</button>
             </li>
             <li class="nav-item">
                 <button type="button" class="nav-link @(_activeTab == EditorTab.Output ? "active" : "")" @onclick="() => _activeTab = EditorTab.Output">Output</button>
@@ -369,6 +373,115 @@ else
                 </div>
             </div>
         }
+        else if (_activeTab == EditorTab.DataSources)
+        {
+            <div class="d-flex flex-column gap-3">
+                @* min-width: 0 overrides the flex item's default min-width:auto, which otherwise
+                   refuses to shrink narrower than its widest unwrapped descendant - exactly the
+                   wide-CSV-preview-blows-out-the-pane bug this was fixed from. Without this, the
+                   <pre> below's own overflow:auto never gets a chance to kick in, since nothing
+                   upstream was ever willing to clip it in the first place. *@
+                <div style="min-width: 0;">
+                    <h6 class="mb-1">Data sources</h6>
+                    <p class="text-muted small mb-2">
+                        Live query results, automatically fetched and included on every run - no user interaction
+                        needed, same as a Knowledge document. Requires a Data Connection to already be configured
+                        by an admin.
+                    </p>
+
+                    @if (_dataConnections.Count == 0)
+                    {
+                        <p class="text-muted small">No Data Connections have been configured yet - an admin needs to add one under Admin → Data Connections first.</p>
+                    }
+
+                    @for (var i = 0; i < _dataSources.Count; i++)
+                    {
+                        var index = i;
+                        var ds = _dataSources[index];
+                        var validationError = SqlQueryValidator.Validate(ds.Query);
+                        <div class="border rounded p-2 mb-2">
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-4">
+                                    <label class="form-label small mb-1">Label</label>
+                                    <input class="form-control form-control-sm" maxlength="256" value="@ds.Label"
+                                           placeholder="e.g. Current pothole reports"
+                                           @oninput="e => ds.Label = e.Value?.ToString() ?? string.Empty" />
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label small mb-1">Connection</label>
+                                    <select class="form-select form-select-sm" @bind="ds.DataConnectionId">
+                                        <option value="">Choose…</option>
+                                        @foreach (var c in _dataConnections)
+                                        {
+                                            <option value="@c.Id">@c.Name@(c.IsEnabled ? "" : " (disabled)")</option>
+                                        }
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="form-label small mb-1">Format</label>
+                                    <select class="form-select form-select-sm" @bind="ds.OutputFormat">
+                                        <option value="@DataQueryOutputFormat.Csv">CSV</option>
+                                        <option value="@DataQueryOutputFormat.Json">JSON</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2 d-flex gap-1 justify-content-end">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@(index == 0)"
+                                            @onclick="() => MoveDataSource(index, -1)" title="Move up">↑</button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@(index == _dataSources.Count - 1)"
+                                            @onclick="() => MoveDataSource(index, 1)" title="Move down">↓</button>
+                                    <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => _dataSources.RemoveAt(index)" title="Remove">✕</button>
+                                </div>
+                            </div>
+
+                            <div class="mt-2">
+                                <label class="form-label small mb-1">Query (read-only - must start with SELECT or WITH)</label>
+                                <textarea class="form-control form-control-sm font-monospace" rows="4" value="@ds.Query"
+                                          @oninput="e => ds.Query = e.Value?.ToString() ?? string.Empty"></textarea>
+                                @if (!string.IsNullOrWhiteSpace(ds.Query) && validationError is not null)
+                                {
+                                    <div class="text-danger small mt-1">@validationError</div>
+                                }
+                            </div>
+
+                            <div class="row g-2 mt-1">
+                                <div class="col-md-8">
+                                    <label class="form-label small mb-1">How should the Helper use this? (optional)</label>
+                                    <input class="form-control form-control-sm" maxlength="1024" value="@ds.UsageInstruction"
+                                           placeholder="e.g. Cross-reference these against the ward names mentioned in the input"
+                                           @oninput="e => ds.UsageInstruction = e.Value?.ToString() ?? string.Empty" />
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label small mb-1">Max rows</label>
+                                    <input type="number" min="1" max="5000" class="form-control form-control-sm" value="@ds.MaxRows"
+                                           @oninput="e => ds.MaxRows = int.TryParse(e.Value?.ToString(), out var n) ? n : ds.MaxRows" />
+                                </div>
+                            </div>
+
+                            <div class="mt-2 d-flex align-items-center gap-2">
+                                <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => TestDataSourceAsync(ds)"
+                                        disabled="@(ds.Testing || ds.DataConnectionId is null || validationError is not null || string.IsNullOrWhiteSpace(ds.Query))">
+                                    @(ds.Testing ? "Running…" : "Test query")
+                                </button>
+                                @if (ds.TestResult is { Success: true } ok)
+                                {
+                                    <span class="text-success small">@ok.RowCount row(s) in @ok.DurationMs ms@(ok.Truncated ? " (truncated)" : "")</span>
+                                }
+                                else if (ds.TestResult is { Success: false } fail)
+                                {
+                                    <span class="text-danger small">@fail.ErrorMessage</span>
+                                }
+                            </div>
+                            @if (ds.TestResult is { Success: true, Content: { } previewContent })
+                            {
+                                <pre class="small border rounded p-2 mt-2 mb-0" style="max-width: 100%; max-height: 10rem; overflow: auto;">@Truncate(previewContent, 2000)</pre>
+                            }
+                        </div>
+                    }
+
+                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => _dataSources.Add(new DataSourceDraft())">+ Add data source</button>
+                </div>
+            </div>
+        }
         else if (_activeTab == EditorTab.Output)
         {
             <div class="d-flex flex-column gap-3">
@@ -549,7 +662,7 @@ else
 
     private const long MaxKnowledgeBytes = 4_500_000;
 
-    private enum EditorTab { Basics, Model, Prompt, Knowledge, Context, Output }
+    private enum EditorTab { Basics, Model, Prompt, Knowledge, Context, DataSources, Output }
     private EditorTab _activeTab = EditorTab.Basics;
 
     private bool _loading = true;
@@ -648,6 +761,47 @@ else
     private const int MaxDocumentContextQuestions = 5;
     private int DocumentQuestionCount => PreviewQuestions.Count(q => q.Type is ContextQuestionType.Document or ContextQuestionType.WebUrl);
 
+    private List<DataSourceDraft> _dataSources = [];
+    private List<DataConnection> _dataConnections = [];
+
+    private class DataSourceDraft
+    {
+        public int? Id { get; set; }
+        public int? DataConnectionId { get; set; }
+        public string Label { get; set; } = "";
+        public string Query { get; set; } = "";
+        public DataQueryOutputFormat OutputFormat { get; set; } = DataQueryOutputFormat.Csv;
+        public int MaxRows { get; set; } = 500;
+        public string UsageInstruction { get; set; } = "";
+
+        // Test-only scratch state - never persisted.
+        public bool Testing { get; set; }
+        public DataQueryResult? TestResult { get; set; }
+    }
+
+    private void MoveDataSource(int index, int delta)
+    {
+        var newIndex = index + delta;
+        if (newIndex < 0 || newIndex >= _dataSources.Count) return;
+        (_dataSources[index], _dataSources[newIndex]) = (_dataSources[newIndex], _dataSources[index]);
+    }
+
+    private async Task TestDataSourceAsync(DataSourceDraft ds)
+    {
+        var connection = _dataConnections.FirstOrDefault(c => c.Id == ds.DataConnectionId);
+        if (connection is null) return;
+
+        ds.Testing = true;
+        ds.TestResult = null;
+        StateHasChanged();
+
+        ds.TestResult = await DataQuery.ExecuteAsync(connection, ds.Query, ds.MaxRows, ds.OutputFormat);
+        ds.Testing = false;
+    }
+
+    private static string Truncate(string text, int maxLength) =>
+        text.Length <= maxLength ? text : text[..maxLength] + "…";
+
     private string _stylesheetId = "";
     private string _outputSchemaJson = "";
 
@@ -666,11 +820,15 @@ else
         _models = await Db.LlmDefinitions.OrderBy(m => m.Name).ToListAsync();
         _categories = await Db.HelperCategories.OrderBy(c => c.Name).ToListAsync();
         _stylesheets = await Db.Stylesheets.OrderBy(s => s.Name).ToListAsync();
+        // All connections, not just enabled ones - a disabled connection an existing Data Source
+        // still references needs to keep showing up in the picker, not vanish from under it.
+        _dataConnections = await Db.DataConnections.OrderBy(c => c.Name).ToListAsync();
 
         if (Id is { } id)
         {
             var existing = await Db.HelperDefinitions
                 .Include(h => h.ContextQuestions)
+                .Include(h => h.DataQueries)
                 .FirstOrDefaultAsync(h => h.Id == id);
             if (existing is null)
             {
@@ -733,6 +891,20 @@ else
             .ToList();
         _contextQuestionsIntro = h.ContextQuestionsIntro ?? "";
         _isContextDriven = h.IsContextDriven;
+
+        _dataSources = h.DataQueries
+            .OrderBy(q => q.SortOrder)
+            .Select(q => new DataSourceDraft
+            {
+                Id = q.Id,
+                DataConnectionId = q.DataConnectionId,
+                Label = q.Label,
+                Query = q.Query,
+                OutputFormat = q.OutputFormat,
+                MaxRows = q.MaxRows,
+                UsageInstruction = q.UsageInstruction ?? ""
+            })
+            .ToList();
 
         _stylesheetId = h.DefaultStylesheetId?.ToString() ?? "";
         _outputSchemaJson = h.OutputSchemaJson ?? "";
@@ -957,6 +1129,22 @@ else
         KnowledgePrompt = _hasKnowledge ? NullIfBlank(_knowledgePrompt) : null,
         ContextQuestionsIntro = NullIfBlank(_contextQuestionsIntro),
         IsContextDriven = _isContextDriven,
+        // DataConnection populated directly from the already-loaded _dataConnections list (not a
+        // DB round-trip) - ResolveDataQueriesAsync reads .DataConnection.IsEnabled straight off
+        // the object, so this preview Helper needs the real navigation filled in, not just the ID,
+        // for the preview run to genuinely exercise the same code path a real run does.
+        DataQueries = [.. _dataSources
+            .Where(d => !string.IsNullOrWhiteSpace(d.Label) && d.DataConnectionId is not null)
+            .Select(d => new HelperDataQuery
+            {
+                DataConnectionId = d.DataConnectionId!.Value,
+                DataConnection = _dataConnections.First(c => c.Id == d.DataConnectionId),
+                Label = d.Label,
+                Query = d.Query,
+                OutputFormat = d.OutputFormat,
+                MaxRows = d.MaxRows,
+                UsageInstruction = NullIfBlank(d.UsageInstruction)
+            })],
         DefaultStylesheetId = ParseIntOrNull(_stylesheetId),
         OutputSchemaJson = NullIfBlank(_outputSchemaJson),
     };
@@ -1021,6 +1209,19 @@ else
             return;
         }
 
+        // Same "blank draft rows are silently dropped, real ones are validated" split as context
+        // questions below - a row only counts as "real" once it has both a label and a chosen
+        // connection.
+        foreach (var ds in _dataSources.Where(d => !string.IsNullOrWhiteSpace(d.Label) && d.DataConnectionId is not null))
+        {
+            var queryError = SqlQueryValidator.Validate(ds.Query);
+            if (queryError is not null)
+            {
+                _saveError = $"Data source \"{ds.Label}\": {queryError}";
+                return;
+            }
+        }
+
         _saving = true;
         _saveError = null;
 
@@ -1036,6 +1237,7 @@ else
         {
             var existing = await Db.HelperDefinitions
                 .Include(h => h.ContextQuestions)
+                .Include(h => h.DataQueries)
                 .FirstOrDefaultAsync(h => h.Id == id);
             if (existing is null)
             {
@@ -1116,6 +1318,43 @@ else
                     OptionsJson = draft.Type == ContextQuestionType.Select
                         ? ContextQuestionOptions.Serialize(ContextQuestionOptions.ParseLines(draft.OptionsText))
                         : null,
+                    SortOrder = i
+                });
+            }
+        }
+
+        // Same shape as the ContextQuestions upsert above - blank/unconnected draft rows dropped
+        // silently (already excluded from the pre-save validation loop above for the same reason).
+        var validDataSources = _dataSources.Where(d => !string.IsNullOrWhiteSpace(d.Label) && d.DataConnectionId is not null).ToList();
+        var keepDataSourceIds = validDataSources.Where(d => d.Id.HasValue).Select(d => d.Id!.Value).ToHashSet();
+        foreach (var stale in entity.DataQueries.Where(q => !keepDataSourceIds.Contains(q.Id)).ToList())
+        {
+            Db.HelperDataQueries.Remove(stale);
+        }
+        for (var i = 0; i < validDataSources.Count; i++)
+        {
+            var draft = validDataSources[i];
+            if (draft.Id is { } dataSourceId)
+            {
+                var existingSource = entity.DataQueries.First(q => q.Id == dataSourceId);
+                existingSource.DataConnectionId = draft.DataConnectionId!.Value;
+                existingSource.Label = draft.Label.Trim();
+                existingSource.Query = draft.Query.Trim();
+                existingSource.OutputFormat = draft.OutputFormat;
+                existingSource.MaxRows = draft.MaxRows;
+                existingSource.UsageInstruction = NullIfBlank(draft.UsageInstruction);
+                existingSource.SortOrder = i;
+            }
+            else
+            {
+                entity.DataQueries.Add(new HelperDataQuery
+                {
+                    DataConnectionId = draft.DataConnectionId!.Value,
+                    Label = draft.Label.Trim(),
+                    Query = draft.Query.Trim(),
+                    OutputFormat = draft.OutputFormat,
+                    MaxRows = draft.MaxRows,
+                    UsageInstruction = NullIfBlank(draft.UsageInstruction),
                     SortOrder = i
                 });
             }

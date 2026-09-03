@@ -4,6 +4,7 @@ using AiHelpers.Data;
 using AiHelpers.Data.Entities;
 using AiHelpers.Data.Enums;
 using AiHelpers.Providers;
+using Microsoft.EntityFrameworkCore;
 
 namespace AiHelpers.Services;
 
@@ -12,7 +13,7 @@ namespace AiHelpers.Services;
 /// against the app's own database, instead of SQL-mediated async polling - see
 /// project_ai_helpers_v1_architecture memory for the original flow this replaces.
 /// </summary>
-public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAdapter> adapters, ISpendStatusService spendStatus) : IHelperInvocationService
+public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAdapter> adapters, ISpendStatusService spendStatus, IDataQueryService dataQueryService) : IHelperInvocationService
 {
     public async Task<HelperInvocationOutcome> RunAsync(HelperDefinition helper, string userInput, string userEmail, IReadOnlyList<Attachment>? attachments = null, CancellationToken cancellationToken = default)
     {
@@ -38,6 +39,12 @@ public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAd
             return new HelperInvocationOutcome { ErrorMessage = $"No adapter available yet for {helper.LlmDefinition.Provider}." };
         }
 
+        var (effectiveInput, dataQueryError) = await ResolveDataQueriesAsync(helper, userInput, userEmail, cancellationToken);
+        if (dataQueryError is not null)
+        {
+            return new HelperInvocationOutcome { ErrorMessage = dataQueryError, Spend = spend, Cap = cap };
+        }
+
         LlmInvocationResult result;
         try
         {
@@ -45,7 +52,7 @@ public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAd
             {
                 Helper = helper,
                 Model = helper.LlmDefinition,
-                UserInput = userInput,
+                UserInput = effectiveInput,
                 Attachments = BuildAttachments(helper, attachments)
             }, cancellationToken);
         }
@@ -124,6 +131,98 @@ public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAd
         };
 
         return uploaded is { Count: > 0 } ? [knowledgeAttachment, .. uploaded] : [knowledgeAttachment];
+    }
+
+    /// <summary>
+    /// Runs every HelperDataQuery attached to this Helper, same "silently included, no user
+    /// interaction needed" shape as BuildAttachments' own Knowledge-document handling above - the
+    /// caller (HelperDetail.razor) never needs to know these exist, same as it never needs to know
+    /// about Knowledge. Requires helper.DataQueries (and each query's DataConnection) to already be
+    /// loaded - a Helper fetched without that Include just runs with an empty collection, same as
+    /// any other unloaded EF navigation, rather than throwing.
+    ///
+    /// A failed or disabled data source aborts the whole run (returns the error instead of a
+    /// prepended block) rather than silently running with missing data - an explicit design
+    /// choice: a Helper built to depend on live data producing output that quietly omits that data
+    /// is worse than a clear failure. Every attempt is logged to DataQueryExecutionLog regardless
+    /// of outcome, both for debugging ("why did this look wrong") and as part of this feature's
+    /// own security auditability story.
+    /// </summary>
+    private async Task<(string EffectiveInput, string? Error)> ResolveDataQueriesAsync(HelperDefinition helper, string userInput, string userEmail, CancellationToken cancellationToken)
+    {
+        if (helper.DataQueries.Count == 0) return (userInput, null);
+
+        var blocks = new List<string>();
+        foreach (var dataQuery in helper.DataQueries.OrderBy(q => q.SortOrder))
+        {
+            if (!dataQuery.DataConnection.IsEnabled)
+            {
+                await LogDataQueryExecutionAsync(dataQuery, userEmail, success: false, rowCount: null, truncated: false, durationMs: 0,
+                    errorMessage: "Connection is disabled.", cancellationToken);
+                return (userInput, $"This Helper's data source \"{dataQuery.Label}\" is currently disabled - contact an admin.");
+            }
+
+            var result = await dataQueryService.ExecuteAsync(dataQuery.DataConnection, dataQuery.Query, dataQuery.MaxRows, dataQuery.OutputFormat, cancellationToken);
+            await LogDataQueryExecutionAsync(dataQuery, userEmail, result.Success, result.RowCount, result.Truncated, result.DurationMs, result.ErrorMessage, cancellationToken);
+
+            if (!result.Success)
+            {
+                return (userInput, $"This Helper's data source \"{dataQuery.Label}\" failed: {result.ErrorMessage}");
+            }
+
+            var heading = string.IsNullOrWhiteSpace(dataQuery.UsageInstruction)
+                ? dataQuery.Label
+                : $"{dataQuery.Label} ({dataQuery.UsageInstruction})";
+            blocks.Add($"## {heading}\n{result.Content}");
+        }
+
+        var dataBlock = "Live data retrieved for this request - read this FIRST, before drafting your response:\n\n" +
+            string.Join("\n\n", blocks);
+        return ($"{dataBlock}\n\n{userInput}", null);
+    }
+
+    private async Task LogDataQueryExecutionAsync(HelperDataQuery dataQuery, string userEmail, bool success, int? rowCount, bool truncated, int durationMs, string? errorMessage, CancellationToken cancellationToken)
+    {
+        // Never let a logging failure break (or crash - see the real incident this comment
+        // replaced) the run itself - same "silent by design" reasoning as AccessLogService.LogAsync.
+        // This is a nice-to-have audit trail, not core functionality; a Helper run that actually
+        // succeeded must never fail purely because its own logging step hit a problem.
+        var logEntry = new DataQueryExecutionLog
+        {
+            // Null, not 0, for a HelperEditor preview run - BuildPreviewHelper's DataQueries are
+            // draft objects built in memory, never persisted, so Id is the CLR default (0), which
+            // isn't a real row and violates the FK (the actual incident this was fixed from - an
+            // unhandled exception here took down the whole circuit). Real, saved queries still
+            // get logged against their actual Id - only an unsaved draft's execution is logged
+            // "loose", same as how AccountingEntry already logs a preview run's real spend
+            // without needing to reference a persisted GeneratedDocument.
+            HelperDataQueryId = dataQuery.Id == 0 ? null : dataQuery.Id,
+            Label = dataQuery.Label,
+            UserId = userEmail,
+            Succeeded = success,
+            RowCount = rowCount,
+            Truncated = truncated,
+            DurationMs = durationMs,
+            ErrorMessage = errorMessage
+        };
+        db.DataQueryExecutionLogs.Add(logEntry);
+        try
+        {
+            // Saved immediately, not batched with the run's other SaveChangesAsync calls - a
+            // query that aborts the run still needs its own failure logged, and an early return
+            // here must not silently lose that.
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            // Detach, not just swallow - db is a scoped-per-circuit AppDbContext in this Blazor
+            // Server app (long-lived for the whole user session, not per-request), so a failed
+            // entity left in the change tracker would keep getting re-submitted - and keep
+            // failing - on every later SaveChangesAsync call for the rest of that circuit's life,
+            // breaking completely unrelated saves too. Detaching removes it from tracking
+            // entirely, so this failure stays contained to this one log entry.
+            db.Entry(logEntry).State = EntityState.Detached;
+        }
     }
 
     private static readonly Regex SuggestedFileNameMarker =

@@ -164,6 +164,9 @@ builder.Services.AddScoped<IFeedbackPromptService, FeedbackPromptService>();
 // plain strings in and bytes out - so a singleton is fine, same as any other pure converter.
 builder.Services.AddSingleton<IDocumentExportService, DocumentExportService>();
 
+// Stateless too - opens/closes its own OdbcConnection per call, no per-circuit state of its own.
+builder.Services.AddSingleton<IDataQueryService, DataQueryService>();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.

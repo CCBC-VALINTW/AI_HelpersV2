@@ -23,6 +23,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<HelperContextQuestion> HelperContextQuestions => Set<HelperContextQuestion>();
     public DbSet<GeneratedDocument> GeneratedDocuments => Set<GeneratedDocument>();
     public DbSet<AccessLogEntry> AccessLogEntries => Set<AccessLogEntry>();
+    public DbSet<DataConnection> DataConnections => Set<DataConnection>();
+    public DbSet<HelperDataQuery> HelperDataQueries => Set<HelperDataQuery>();
+    public DbSet<DataQueryExecutionLog> DataQueryExecutionLogs => Set<DataQueryExecutionLog>();
     public DbSet<Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey> DataProtectionKeys => Set<Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -229,6 +232,52 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .WithMany() // No nav collection back on Stylesheet - same reasoning as above.
                 .HasForeignKey(p => p.StylesheetId)
                 .OnDelete(DeleteBehavior.SetNull); // Preserve the document if its stylesheet is later deleted.
+        });
+
+        modelBuilder.Entity<DataConnection>(e =>
+        {
+            e.Property(p => p.Name).HasMaxLength(128).IsRequired();
+            e.Property(p => p.Description).HasMaxLength(2048);
+            e.Property(p => p.Type).HasConversion<string>().HasMaxLength(20);
+            e.Property(p => p.CreatedBy).HasMaxLength(256);
+            e.Property(p => p.LastTestMessage).HasMaxLength(2048);
+        });
+
+        modelBuilder.Entity<HelperDataQuery>(e =>
+        {
+            e.Property(p => p.Label).HasMaxLength(256).IsRequired();
+            e.Property(p => p.OutputFormat).HasConversion<string>().HasMaxLength(10);
+            e.Property(p => p.UsageInstruction).HasMaxLength(1024);
+
+            // Queries belong to their Helper and have no independent meaning - cascade, same as
+            // HelperContextQuestion.
+            e.HasOne(p => p.HelperDefinition)
+                .WithMany(h => h.DataQueries)
+                .HasForeignKey(p => p.HelperDefinitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Restrict, not SetNull/Cascade - DataConnectionId isn't nullable (a query with no
+            // connection is meaningless), and silently cascading the delete would destroy a
+            // Helper's query config as a side effect of someone tidying up connections. Forces the
+            // real intended path instead: disable the connection (DataConnection.IsEnabled),
+            // don't delete it while anything still references it.
+            e.HasOne(p => p.DataConnection)
+                .WithMany(c => c.DataQueries)
+                .HasForeignKey(p => p.DataConnectionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<DataQueryExecutionLog>(e =>
+        {
+            e.Property(p => p.Label).HasMaxLength(256).IsRequired();
+            e.Property(p => p.UserId).HasMaxLength(256);
+            e.Property(p => p.ErrorMessage).HasMaxLength(2048);
+            e.HasIndex(p => p.TimestampUtc);
+
+            e.HasOne(p => p.HelperDataQuery)
+                .WithMany()
+                .HasForeignKey(p => p.HelperDataQueryId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
     }
 }

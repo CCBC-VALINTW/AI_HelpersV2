@@ -1,0 +1,308 @@
+@page "/admin/data-connections"
+@attribute [Authorize(Policy = "AdminOnly")]
+@rendermode InteractiveServer
+@using System.ComponentModel.DataAnnotations
+@using AiHelpers.Data
+@using AiHelpers.Data.Entities
+@using AiHelpers.Data.Enums
+@using AiHelpers.Services
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject AppDbContext Db
+@inject IDataQueryService DataQuery
+@inject ICurrentUserService CurrentUser
+
+<PageTitle>Data Connections</PageTitle>
+
+<h1>Data Connections</h1>
+<p class="text-muted">
+    ODBC connections a Helper can query for live data (see Data Sources on the Helper Editor).
+    <strong>Use an account with least-privilege, read-only access to whatever this connects to</strong> -
+    query text is only lightly checked for obviously unsafe statements, so the account's own
+    permissions are what actually keeps this safe, not that check.
+</p>
+
+@if (_loading)
+{
+    <p><em>Loading…</em></p>
+}
+else
+{
+    <div class="card mb-4">
+        <div class="card-header">Configured connections</div>
+        <div class="card-body p-0">
+            @if (_connections.Count == 0)
+            {
+                <p class="text-muted p-3 mb-0">No connections configured yet.</p>
+            }
+            else
+            {
+                <table class="table align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Status</th>
+                            <th>Last tested</th>
+                            <th>Created</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var c in _connections)
+                        {
+                            <tr>
+                                <td>
+                                    @c.Name
+                                    @if (!string.IsNullOrWhiteSpace(c.Description))
+                                    {
+                                        <div class="text-muted small">@c.Description</div>
+                                    }
+                                </td>
+                                <td>@c.Type</td>
+                                <td><span class="badge @(c.IsEnabled ? "text-bg-primary" : "text-bg-secondary")">@(c.IsEnabled ? "Enabled" : "Disabled")</span></td>
+                                <td>
+                                    @if (c.LastTestedAtUtc is null)
+                                    {
+                                        <span class="text-muted small">Never</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge @(c.LastTestSucceeded == true ? "text-bg-success" : "text-bg-danger")"
+                                              title="@c.LastTestMessage">
+                                            @(c.LastTestSucceeded == true ? "OK" : "Failed") · @c.LastTestedAtUtc.Value.ToLocalTime().ToString("g")
+                                        </span>
+                                    }
+                                </td>
+                                <td class="text-muted small">@c.CreatedAtUtc.ToLocalTime().ToString("g")<br />@c.CreatedBy</td>
+                                <td class="text-end">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => TestExistingAsync(c)" disabled="@_testing">
+                                        @(_testing && _testingId == c.Id ? "Testing…" : "Test")
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => Edit(c)">Edit</button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => ToggleEnabledAsync(c)">
+                                        @(c.IsEnabled ? "Disable" : "Enable")
+                                    </button>
+                                    <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => DeleteAsync(c)">Delete</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">@(_editingId is null ? "Add connection" : $"Edit: {_form.Name}")</div>
+        <div class="card-body">
+            <EditForm Model="_form" OnValidSubmit="SaveAsync">
+                <DataAnnotationsValidator />
+
+                <div class="mb-3">
+                    <label class="form-label" for="connName">Name</label>
+                    <InputText id="connName" class="form-control" @bind-Value="_form.Name" />
+                    <ValidationMessage For="@(() => _form.Name)" />
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label" for="connDesc">Description (optional)</label>
+                    <InputTextArea id="connDesc" class="form-control" rows="2" @bind-Value="_form.Description" />
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label" for="connString">ODBC connection string</label>
+                    <InputText id="connString" type="password" class="form-control font-monospace" @bind-Value="_form.ConnectionString"
+                               placeholder="@(_editingId is null ? "DRIVER={ODBC Driver 18 for SQL Server};SERVER=...;DATABASE=...;UID=...;PWD=...;" : "Leave blank to keep the existing connection string")" />
+                    <div class="form-text">
+                        Use a dedicated account granted least-privilege, ideally read-only, access on the target
+                        system - not a shared admin/service account. For SQL Server, adding
+                        <code>ApplicationIntent=ReadOnly</code> is a useful extra signal if the server has
+                        Always On read-only routing configured, but it's not a substitute for the account's
+                        own permissions being genuinely restricted.
+                    </div>
+                </div>
+
+                @if (_saveError is not null)
+                {
+                    <div class="alert alert-danger">@_saveError</div>
+                }
+                @if (_testResult is not null)
+                {
+                    <div class="alert @(_testResult.Success ? "alert-success" : "alert-danger")">
+                        @(_testResult.Success ? "Connection succeeded." : $"Connection failed: {_testResult.ErrorMessage}")
+                    </div>
+                }
+
+                <div class="d-flex gap-2">
+                    <button type="submit" class="btn btn-primary" disabled="@_saving">@(_saving ? "Saving…" : "Save")</button>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="TestFormAsync" disabled="@(_testing || string.IsNullOrWhiteSpace(_form.ConnectionString))">
+                        @(_testing && _testingId is null ? "Testing…" : "Test before saving")
+                    </button>
+                    @if (_editingId is not null)
+                    {
+                        <button type="button" class="btn btn-link" @onclick="ResetForm">Cancel edit</button>
+                    }
+                </div>
+            </EditForm>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private bool _saving;
+    private bool _testing;
+    private int? _testingId; // null while testing the in-progress form's own (unsaved) value
+    private List<DataConnection> _connections = [];
+    private int? _editingId;
+    private ConnectionForm _form = new();
+    private string? _saveError;
+    private DataQueryResult? _testResult;
+    private string _email = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _email = await CurrentUser.GetEmailAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _connections = await Db.DataConnections.OrderBy(c => c.Name).ToListAsync();
+        _loading = false;
+    }
+
+    private void Edit(DataConnection c)
+    {
+        _editingId = c.Id;
+        _form = new ConnectionForm { Name = c.Name, Description = c.Description ?? "", ConnectionString = "" };
+        _saveError = null;
+        _testResult = null;
+    }
+
+    private void ResetForm()
+    {
+        _editingId = null;
+        _form = new ConnectionForm();
+        _saveError = null;
+        _testResult = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        _saveError = null;
+
+        if (_editingId is null && string.IsNullOrWhiteSpace(_form.ConnectionString))
+        {
+            _saveError = "A connection string is required for a new connection.";
+            return;
+        }
+
+        _saving = true;
+
+        if (_editingId is { } id)
+        {
+            var existing = await Db.DataConnections.FirstOrDefaultAsync(c => c.Id == id);
+            if (existing is null)
+            {
+                _saveError = "This connection no longer exists.";
+                _saving = false;
+                return;
+            }
+            existing.Name = _form.Name.Trim();
+            existing.Description = string.IsNullOrWhiteSpace(_form.Description) ? null : _form.Description.Trim();
+            if (!string.IsNullOrWhiteSpace(_form.ConnectionString))
+            {
+                existing.EncryptedConnectionString = DataQuery.EncryptConnectionString(_form.ConnectionString);
+            }
+        }
+        else
+        {
+            Db.DataConnections.Add(new DataConnection
+            {
+                Name = _form.Name.Trim(),
+                Description = string.IsNullOrWhiteSpace(_form.Description) ? null : _form.Description.Trim(),
+                EncryptedConnectionString = DataQuery.EncryptConnectionString(_form.ConnectionString),
+                CreatedBy = _email
+            });
+        }
+
+        await Db.SaveChangesAsync();
+
+        ResetForm();
+        await LoadAsync();
+        _saving = false;
+    }
+
+    /// <summary>Tests the connection string currently typed into the form - not necessarily saved
+    /// yet - so an admin can confirm it works before committing to it.</summary>
+    private async Task TestFormAsync()
+    {
+        _testing = true;
+        _testingId = null;
+        _testResult = null;
+        StateHasChanged();
+
+        if (string.IsNullOrWhiteSpace(_form.ConnectionString) && _editingId is { } existingId)
+        {
+            var existing = await Db.DataConnections.AsNoTracking().FirstOrDefaultAsync(c => c.Id == existingId);
+            _testResult = existing is null ? null : await DataQuery.TestAsync(existing);
+        }
+        else
+        {
+            var probe = new DataConnection
+            {
+                Name = "probe",
+                EncryptedConnectionString = DataQuery.EncryptConnectionString(_form.ConnectionString)
+            };
+            _testResult = await DataQuery.TestAsync(probe);
+        }
+
+        _testing = false;
+    }
+
+    private async Task TestExistingAsync(DataConnection c)
+    {
+        _testing = true;
+        _testingId = c.Id;
+        StateHasChanged();
+
+        var result = await DataQuery.TestAsync(c);
+
+        c.LastTestedAtUtc = DateTime.UtcNow;
+        c.LastTestSucceeded = result.Success;
+        c.LastTestMessage = result.Success ? null : result.ErrorMessage;
+        await Db.SaveChangesAsync();
+
+        _testing = false;
+        _testingId = null;
+    }
+
+    private async Task ToggleEnabledAsync(DataConnection c)
+    {
+        c.IsEnabled = !c.IsEnabled;
+        await Db.SaveChangesAsync();
+    }
+
+    private async Task DeleteAsync(DataConnection c)
+    {
+        var inUse = await Db.HelperDataQueries.AnyAsync(q => q.DataConnectionId == c.Id);
+        if (inUse)
+        {
+            _saveError = $"\"{c.Name}\" is still used by at least one Helper's Data Source - disable it instead, or remove those Data Sources first.";
+            return;
+        }
+
+        Db.DataConnections.Remove(c);
+        await Db.SaveChangesAsync();
+        await LoadAsync();
+    }
+
+    private class ConnectionForm
+    {
+        [Required] public string Name { get; set; } = "";
+        public string Description { get; set; } = "";
+        public string ConnectionString { get; set; } = "";
+    }
+}

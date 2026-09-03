@@ -591,6 +591,7 @@ else
             .Include(h => h.HelperCategory)
             .Include(h => h.LlmDefinition)
             .Include(h => h.ContextQuestions)
+            .Include(h => h.DataQueries).ThenInclude(q => q.DataConnection)
             .Where(h => h.Id == Id && (h.Scope == HelperScope.General || h.OwnerEmail == _email))
             .FirstOrDefaultAsync();
 
@@ -713,6 +714,19 @@ else
                 IsMandatory = q.IsMandatory,
                 UsageInstruction = q.UsageInstruction,
                 OptionsJson = q.OptionsJson,
+                SortOrder = q.SortOrder
+            })],
+            // References the same DataConnection rows, same as LlmDefinitionId above - Data
+            // Connections are shared admin-managed resources, not per-Helper, so there's nothing
+            // to actually clone here.
+            DataQueries = [.. _helper.DataQueries.OrderBy(q => q.SortOrder).Select(q => new Data.Entities.HelperDataQuery
+            {
+                DataConnectionId = q.DataConnectionId,
+                Label = q.Label,
+                Query = q.Query,
+                OutputFormat = q.OutputFormat,
+                MaxRows = q.MaxRows,
+                UsageInstruction = q.UsageInstruction,
                 SortOrder = q.SortOrder
             })]
         };
