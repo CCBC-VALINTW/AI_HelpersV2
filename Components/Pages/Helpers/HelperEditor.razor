@@ -742,8 +742,13 @@ else
     /// <summary>Mirrors HelperDetail.razor's own ContextDrivenNeedsAnswer - an IsContextDriven
     /// preview run with nothing answered hits the exact same "empty text, no attachments" Bedrock
     /// rejection the real run page does, so the preview pane needs the same guard rather than
-    /// letting a wasted (and billed) call reach Bedrock only to fail.</summary>
-    private bool PreviewContextDrivenNeedsAnswer => _isContextDriven && !PreviewQuestions.Any(q => q.Type switch
+    /// letting a wasted (and billed) call reach Bedrock only to fail. Same Data Source exemption
+    /// too - a Data Source attached guarantees non-blank content on its own (see
+    /// BuildPreviewHelper's own DataQueries), regardless of whether any context question is
+    /// answered.</summary>
+    private bool PreviewContextDrivenNeedsAnswer => _isContextDriven
+        && !_dataSources.Any(d => !string.IsNullOrWhiteSpace(d.Label) && d.DataConnectionId is not null)
+        && !PreviewQuestions.Any(q => q.Type switch
     {
         ContextQuestionType.Text or ContextQuestionType.Select => !string.IsNullOrWhiteSpace(q.PreviewText),
         ContextQuestionType.Document or ContextQuestionType.WebUrl => q.PreviewDocument is not null,

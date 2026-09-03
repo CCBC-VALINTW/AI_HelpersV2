@@ -118,6 +118,19 @@ else
         }
     </div>;
 
+    // Shown near attachments (and, for an IsContextDriven Helper, near the "no general input"
+    // note) so the user can see that live data is being pulled in automatically - Data Sources
+    // are never something the user interacts with (see HelperDataQuery's own doc comment), so
+    // without this they'd have no visibility at all into part of what's actually being sent.
+    RenderFragment RenderDataFeedIndicator = @<div class="d-flex flex-wrap gap-2 mt-2">
+        @foreach (var dq in _helper!.DataQueries.OrderBy(q => q.SortOrder))
+        {
+            <span class="badge text-bg-info" title="@(dq.UsageInstruction ?? "Live data, automatically included with every run")">
+                Data Feed: @dq.Label
+            </span>
+        }
+    </div>;
+
     // Shared between the pre- and post-output states of the Options card - both toggles apply
     // to whichever call comes next regardless of when they're set (RunOrRefine always flows
     // through the same BuildEffectiveInput).
@@ -267,6 +280,10 @@ else
                                 This Helper is fully driven by the context questions below - there's no general
                                 input here, just complete them and click Run.
                             </p>
+                            @if (_helper.DataQueries.Count > 0)
+                            {
+                                @RenderDataFeedIndicator
+                            }
                         }
                         else
                         {
@@ -310,6 +327,11 @@ else
                                         </div>
                                     </div>
                                 }
+                            }
+
+                            @if (_helper.DataQueries.Count > 0)
+                            {
+                                @RenderDataFeedIndicator
                             }
                         }
 
@@ -501,8 +523,15 @@ else
     /// anything" rules per type, since that's what actually determines whether the call ends up
     /// non-empty (a Document/WebUrl answer only requires HAVING a file - if its own
     /// UsageInstruction is blank, BedrockAdapter's separate "attachment but no text" fallback
-    /// still covers that case).</summary>
-    private bool ContextDrivenNeedsAnswer => _helper is { IsContextDriven: true } && !_contextAnswers.Any(a => a.Question.Type switch
+    /// still covers that case).
+    ///
+    /// A Data Source attached to the Helper always satisfies this on its own, regardless of
+    /// context answers - ResolveDataQueriesAsync guarantees non-blank text whenever
+    /// helper.DataQueries is non-empty (its own "Live data retrieved..." framing text alone sees
+    /// to that), so a context-driven Helper that relies entirely on a Data Source, with few or no
+    /// context questions of its own, must never be blocked here - a real bug this was fixed from,
+    /// not a hypothetical either.</summary>
+    private bool ContextDrivenNeedsAnswer => _helper is { IsContextDriven: true } && _helper.DataQueries.Count == 0 && !_contextAnswers.Any(a => a.Question.Type switch
     {
         ContextQuestionType.Text or ContextQuestionType.Select => !string.IsNullOrWhiteSpace(a.Text),
         ContextQuestionType.Document or ContextQuestionType.WebUrl => a.Document is not null,
