@@ -1,0 +1,10 @@
+/* .helper-output is defined in HelperDetail.razor.css too, but Blazor's CSS isolation scopes
+   that to HelperDetail.razor's own markup only - it never actually applied here, so this page's
+   iframe was rendering at the browser's unstyled default size (a few hundred px) rather than
+   merely "a bit small". Sized taller than HelperDetail's own 32rem: this page has nothing else
+   competing for vertical space - the preview is effectively the whole point of the page. */
+.helper-output {
+    width: 100%;
+    height: 44rem;
+    background-color: #fff;
+}

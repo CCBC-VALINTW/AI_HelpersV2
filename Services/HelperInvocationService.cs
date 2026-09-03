@@ -92,6 +92,8 @@ public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAd
             string.IsNullOrWhiteSpace(suggestedDescription) ? helper.Name : $"{helper.Name} - {suggestedDescription}",
             fallback: helper.Name);
 
+        await LogCallbackEntryAsync(helper, userEmail, content, suggestedFileName, result, cancellationToken);
+
         var response = new HelperResponse
         {
             SuggestedFileName = suggestedFileName,
@@ -222,6 +224,51 @@ public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAd
             // breaking completely unrelated saves too. Detaching removes it from tracking
             // entirely, so this failure stays contained to this one log entry.
             db.Entry(logEntry).State = EntityState.Detached;
+        }
+    }
+
+    // 7 days - explicitly a recovery window, not real retention; GeneratedDocument (an actual
+    // deliberate save) is what's meant to last.
+    private static readonly TimeSpan CallbackEntryRetention = TimeSpan.FromDays(7);
+
+    /// <summary>
+    /// Snapshots this run's raw output so it can be recovered without re-running the LLM call -
+    /// captured unconditionally on every successful run (including a Helper Editor preview),
+    /// regardless of whether the caller goes on to persist it as a real GeneratedDocument. See
+    /// CallbackEntry's own doc comment for the full "why".
+    /// </summary>
+    private async Task LogCallbackEntryAsync(HelperDefinition helper, string userEmail, string content, string suggestedFileName, LlmInvocationResult result, CancellationToken cancellationToken)
+    {
+        var entry = new CallbackEntry
+        {
+            CreatedByEmail = userEmail,
+            HelperDefinitionId = helper.Id,
+            HelperName = helper.Name,
+            OutputHtml = content,
+            SuggestedFileName = suggestedFileName,
+            InputTokens = result.InputTokens,
+            OutputTokens = result.OutputTokens,
+            StopReason = result.StopReason
+        };
+        db.CallbackEntries.Add(entry);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+
+            // Opportunistic purge on every write, same pattern as AccessLogService - no separate
+            // background-job infrastructure needed just for cleanup, and this stays a rolling
+            // recovery window rather than an ever-growing table.
+            var cutoff = DateTime.UtcNow - CallbackEntryRetention;
+            await db.CallbackEntries
+                .Where(c => c.CreatedAtUtc < cutoff)
+                .ExecuteDeleteAsync(cancellationToken);
+        }
+        catch
+        {
+            // Never let this break the run itself - see LogDataQueryExecutionAsync's own doc
+            // comment for why detaching (not just swallowing) matters for this app's
+            // scoped-per-circuit AppDbContext specifically.
+            db.Entry(entry).State = EntityState.Detached;
         }
     }
 

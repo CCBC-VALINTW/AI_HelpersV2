@@ -128,11 +128,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
         modelBuilder.Entity<CallbackEntry>(e =>
         {
-            e.Property(p => p.Initiator).HasMaxLength(256);
-            e.Property(p => p.StopReason).HasMaxLength(128);
+            e.Property(p => p.CreatedByEmail).HasMaxLength(256).IsRequired();
             e.Property(p => p.HelperName).HasMaxLength(128);
-            e.Property(p => p.Status).HasConversion<string>().HasMaxLength(10);
+            e.Property(p => p.SuggestedFileName).HasMaxLength(256);
+            e.Property(p => p.StopReason).HasMaxLength(64);
             e.HasIndex(p => p.CallbackGuid).IsUnique();
+            // Backs both the retention purge (WHERE CreatedAtUtc < cutoff) and the "my recent
+            // runs" list query (WHERE CreatedByEmail = ... ORDER BY CreatedAtUtc).
+            e.HasIndex(p => new { p.CreatedByEmail, p.CreatedAtUtc });
 
             e.HasOne(p => p.HelperDefinition)
                 .WithMany(h => h.CallbackEntries)

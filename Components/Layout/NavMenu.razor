@@ -45,6 +45,12 @@
         </div>
 
         <div class="nav-item px-3">
+            <NavLink class="nav-link" href="recent-runs" title="Recent Runs">
+                <span class="bi bi-recent-runs-nav-menu" aria-hidden="true"></span> <span class="nav-link-text">Recent Runs</span>
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
             <button type="button" class="nav-link feedback-nav-button @(_shouldPulse ? "feedback-pulse" : "")"
                     title="Feedback" @onclick="RequestFeedback">
                 <span class="bi bi-feedback-nav-menu" aria-hidden="true"></span> <span class="nav-link-text">Feedback</span>

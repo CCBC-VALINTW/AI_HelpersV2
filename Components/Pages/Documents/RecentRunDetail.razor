@@ -1,0 +1,135 @@
+@page "/recent-runs/{Guid:guid}"
+@rendermode InteractiveServer
+@implements IAsyncDisposable
+@using AiHelpers.Data
+@using AiHelpers.Services
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.JSInterop
+@inject AppDbContext Db
+@inject ICurrentUserService CurrentUser
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+<PageTitle>Recent Run</PageTitle>
+
+@if (_loading)
+{
+    <p><em>Loading…</em></p>
+}
+else if (_entry is null)
+{
+    <p class="text-muted">
+        This run isn't available - it may have already expired (kept for 7 days), or it isn't yours.
+        <a href="/recent-runs">Back to recent runs</a>.
+    </p>
+}
+else
+{
+    <div class="d-flex justify-content-between align-items-start mb-3">
+        <div>
+            <h1 class="mb-1">@(_entry.HelperName ?? "Recent run")</h1>
+            <p class="text-muted mb-0">
+                Generated @_entry.CreatedAtUtc.ToLocalTime().ToString("g") - kept until @_entry.CreatedAtUtc.AddDays(7).ToLocalTime().ToString("d MMM yyyy")
+            </p>
+        </div>
+        <a href="/recent-runs" class="btn btn-outline-secondary btn-sm">← Back to recent runs</a>
+    </div>
+
+    <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+        <a class="btn btn-outline-secondary btn-sm" href="@BuildOutputDataUri()" download="@(FileNameSanitizer.Sanitize(_entry.SuggestedFileName ?? _entry.HelperName, fallback: "recent-run") + ".html")">Download as HTML</a>
+        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="OpenInNewTab">Open in new tab</button>
+        <button type="button" class="btn btn-primary btn-sm" @onclick="SendToEditor" disabled="@_sendingToEditor">
+            @(_sendingToEditor ? "Sending…" : "Send to editor")
+        </button>
+    </div>
+
+    <iframe class="border rounded helper-output" srcdoc="@BuildOutputDocument(_entry.OutputHtml, _stylesheetCss)" sandbox=""></iframe>
+}
+
+@code {
+    [Parameter] public Guid Guid { get; set; }
+
+    private bool _loading = true;
+    private Data.Entities.CallbackEntry? _entry;
+    private string? _stylesheetCss;
+    private string _email = "";
+    private bool _sendingToEditor;
+    private IJSObjectReference? _actionsModule;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _email = await CurrentUser.GetEmailAsync();
+
+        // Same "not found vs not yours" non-distinction as DocumentList/HelperDetail's own
+        // document access checks - a caller probing GUIDs learns nothing either way.
+        _entry = await Db.CallbackEntries
+            .Include(c => c.HelperDefinition)
+            .ThenInclude(h => h!.DefaultStylesheet)
+            .Where(c => c.CallbackGuid == Guid && c.CreatedByEmail == _email)
+            .FirstOrDefaultAsync();
+
+        // No StylesheetId stored on CallbackEntry itself (the run page's own selection isn't
+        // settled at the point a run completes, see HelperInvocationService's own reasoning) -
+        // falls back to whatever the Helper's current default is, same as a first run would.
+        _stylesheetCss = _entry?.HelperDefinition?.DefaultStylesheet?.Css;
+
+        _loading = false;
+    }
+
+    private async Task SendToEditor()
+    {
+        if (_entry is null) return;
+
+        _sendingToEditor = true;
+        StateHasChanged();
+        try
+        {
+            var document = new Data.Entities.GeneratedDocument
+            {
+                HelperDefinitionId = _entry.HelperDefinitionId,
+                CreatedByEmail = _email,
+                Title = _entry.SuggestedFileName ?? _entry.HelperName ?? "Recent run",
+                HtmlContent = _entry.OutputHtml,
+                StylesheetId = _entry.HelperDefinition?.DefaultStylesheetId,
+                CreatedAtUtc = DateTime.UtcNow,
+                LastModifiedAtUtc = DateTime.UtcNow,
+            };
+            Db.GeneratedDocuments.Add(document);
+            await Db.SaveChangesAsync();
+
+            await JS.InvokeVoidAsync("open", $"/documents/{document.Id}", "_blank");
+        }
+        finally
+        {
+            _sendingToEditor = false;
+        }
+    }
+
+    private async Task OpenInNewTab()
+    {
+        if (_entry is null) return;
+        _actionsModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "/js/outputActions.js");
+        await _actionsModule.InvokeVoidAsync("openInNewTab", BuildOutputDocument(_entry.OutputHtml, _stylesheetCss));
+    }
+
+    private static string BuildOutputDocument(string bodyHtml, string? stylesheetCss) =>
+        OutputDocumentBuilder.Build(bodyHtml, stylesheetCss);
+
+    private string BuildOutputDataUri() =>
+        "data:text/html;charset=utf-8;base64," + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(BuildOutputDocument(_entry!.OutputHtml, _stylesheetCss)));
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_actionsModule is not null)
+        {
+            try
+            {
+                await _actionsModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit already gone - nothing to clean up.
+            }
+        }
+    }
+}
