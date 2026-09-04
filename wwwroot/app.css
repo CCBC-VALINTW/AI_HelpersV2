@@ -17,7 +17,8 @@
        text on a conwy-purple button fill, since contrast is symmetric). These are the same two
        hues, minimally darkened until each clears 4.5:1 - use them anywhere the brand colour
        carries text or sits under/over white text; keep the literal swatches above for anything
-       purely decorative. */
+       purely decorative. See the [data-bs-theme=dark] block below for the same two hues
+       re-picked and re-checked against a dark background instead, not just inverted blindly. */
     --conwy-green-text: #008673;
     --conwy-purple-text: #756fb3;
 
@@ -26,6 +27,31 @@
     --bs-primary-rgb: 117, 111, 179;
     --bs-link-color-rgb: 0, 134, 115;
     --bs-link-hover-color-rgb: 49, 89, 124;
+    --bs-body-color: var(--conwy-base);
+}
+
+/* Dark-mode counterparts, honouring the browser/OS light-dark preference (see the theme-detection
+   script in Components/App.razor, which sets data-bs-theme on <html>). Bootstrap's own vendored
+   [data-bs-theme=dark] block (bootstrap.min.css) already handles --bs-body-bg and every other
+   token this file doesn't touch - this only needs to cover the Conwy-branded tokens actually set
+   above. Must come AFTER :root in this file: :root and [data-bs-theme=dark] are equal-specificity
+   selectors (both ultimately target <html>), so without this ordering :root's unconditional
+   values would keep winning even when dark mode is active, silently overriding Bootstrap's own
+   correct dark tokens - that's the actual bug this block exists to avoid, not just cosmetic
+   ordering. Each colour below is freshly contrast-checked against Bootstrap's dark background
+   (#212529), the same rigour the light-mode comment above describes, not a blind inversion:
+   conwy-purple-text lightened to #a39dd9 (6.16:1), conwy-green-text to #3ecdb3 (7.78:1),
+   conwy-base to Bootstrap's own stock dark body colour (already accessible, no bespoke branding
+   reason to deviate from it for plain body text). */
+[data-bs-theme="dark"] {
+    --conwy-base: #dee2e6;
+    --conwy-green-text: #3ecdb3;
+    --conwy-purple-text: #a39dd9;
+
+    --bs-primary: var(--conwy-purple-text);
+    --bs-primary-rgb: 163, 157, 217;
+    --bs-link-color-rgb: 62, 205, 179;
+    --bs-link-hover-color-rgb: 29, 166, 190;
     --bs-body-color: var(--conwy-base);
 }
 
@@ -78,7 +104,9 @@ a, .btn-link {
 }
 
 .btn:focus, .btn:active:focus, .btn-link.nav-link:focus, .form-control:focus, .form-check-input:focus {
-  box-shadow: 0 0 0 0.1rem white, 0 0 0 0.25rem var(--conwy-purple-text);
+  /* The inner ring matches the page background (not a literal white) so it reads as a gap/halo
+     around the button rather than a jarring white ring on a dark page. */
+  box-shadow: 0 0 0 0.1rem var(--bs-body-bg, white), 0 0 0 0.25rem var(--conwy-purple-text);
 }
 
 .content {
@@ -112,6 +140,13 @@ h1:focus {
 
 .validation-message {
     color: #e50000;
+}
+
+/* #e50000 only measures 3.18:1 against Bootstrap's dark background (#212529) - fine for a 1px
+   .invalid outline (WCAG's 3:1 non-text threshold) but not for this actual text, which needs
+   4.5:1. #ff6b6b clears it at 5.56:1. */
+[data-bs-theme="dark"] .validation-message {
+    color: #ff6b6b;
 }
 
 .blazor-error-boundary {

@@ -6,6 +6,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
     <ResourcePreloader />
+    <script>
+        // Sets data-bs-theme before any CSS paints, so there's no flash of the wrong theme on
+        // load - a synchronous inline script in <head> is the standard pattern for this (it
+        // blocks rendering briefly, which is the point: nothing should paint before the theme
+        // is decided). Follows the OS/browser preference live via the 'change' listener below,
+        // no manual toggle - matches what was actually asked for ("honour the browser's
+        // preference"), not a user-facing light/dark switch.
+        (function () {
+            var media = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+            var applyTheme = function () {
+                document.documentElement.setAttribute('data-bs-theme', media && media.matches ? 'dark' : 'light');
+            };
+            applyTheme();
+            if (media && media.addEventListener) {
+                media.addEventListener('change', applyTheme);
+            }
+        })();
+    </script>
     <link rel="stylesheet" href="@Assets["lib/bootstrap/dist/css/bootstrap.min.css"]" />
     <link rel="stylesheet" href="@Assets["app.css"]" />
     <link rel="stylesheet" href="@Assets["AiHelpers.styles.css"]" />

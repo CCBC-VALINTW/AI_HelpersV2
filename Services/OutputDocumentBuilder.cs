@@ -30,12 +30,19 @@ public static class OutputDocumentBuilder
         var body = applyStylesheet ? StripEmbeddedStyles(bodyHtml) : bodyHtml;
         var titleTag = title is null ? "" : $"<title>{WebUtility.HtmlEncode(title)}</title>\n";
 
+        // color-scheme: light is deliberate, not an oversight - the app shell follows the
+        // browser's light/dark preference (see the theme-detection script in Components/
+        // App.razor), but this is a genuinely separate document (also the actual bytes of the
+        // exported .html file, via DocumentExportService.ToHtml - not just a preview), meant to
+        // be read/printed/exported the same way a Word document is - always on a light page,
+        // regardless of the viewer's OS setting. Without this, a browser with dark mode enabled
+        // would apply its own default dark UA styles to this otherwise-unstyled document instead.
         return $$"""
             <!DOCTYPE html>
             <html>
             <head>
             <meta charset="utf-8" />
-            {{titleTag}}<style>body { font-family: Calibri, Arial, sans-serif; margin: 1rem; }</style>
+            {{titleTag}}<style>:root { color-scheme: light; } body { font-family: Calibri, Arial, sans-serif; margin: 1rem; background: #fff; }</style>
             {{(applyStylesheet ? stylesheetCss : "")}}
             </head>
             <body><div class="rendDoc">{{body}}</div></body>

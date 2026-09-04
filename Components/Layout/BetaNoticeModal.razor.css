@@ -1,4 +1,8 @@
 #beta-notice-modal {
+    /* A native <dialog>'s default background is UA-supplied (white) and doesn't follow
+       prefers-color-scheme on its own - has to be set explicitly to actually track the theme. */
+    background-color: var(--bs-body-bg, white);
+    color: var(--bs-body-color, inherit);
     width: 28rem;
     max-width: calc(100vw - 2rem);
     margin: 15vh auto;
@@ -29,10 +33,10 @@
     background: none;
     font-size: 1.5rem;
     line-height: 1;
-    color: #666;
+    color: var(--bs-secondary-color, #666);
     cursor: pointer;
 }
 
 .beta-notice-close:hover {
-    color: #000;
+    color: var(--bs-body-color, #000);
 }

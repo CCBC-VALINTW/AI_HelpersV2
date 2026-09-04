@@ -25,18 +25,21 @@
 }
 
 /* Consistent gold accent (not part of the rotating category cycle below) - matches the
-   favourite-star colour used elsewhere, so "this is a favourite" reads the same everywhere. */
+   favourite-star colour used elsewhere, so "this is a favourite" reads the same everywhere.
+   Mixed toward --bs-body-bg, not a literal white - on a dark page that's #212529, so the tint
+   comes out as a subtly-lit dark card instead of staying near-white regardless of theme (which
+   would then have --category-tile-name's dark-mode light text sitting on a near-white tile). */
 .favorite-tile {
     border-left-color: #f5b301;
-    background-color: color-mix(in srgb, #f5b301 8%, white);
+    background-color: color-mix(in srgb, #f5b301 8%, var(--bs-body-bg, white));
 }
 
 /* Subtle rotating tint + accent, cycling through the Conwy brand ramp - six colours, six tiles
    before repeating. Kept light (a tinted background, not a solid fill) so it reads as a gentle
    accent rather than a loud block of colour. */
-.category-tiles .col:nth-of-type(6n+1) .category-tile { border-left-color: var(--conwy-ramp-1, #565f90); background-color: color-mix(in srgb, var(--conwy-ramp-1, #565f90) 8%, white); }
-.category-tiles .col:nth-of-type(6n+2) .category-tile { border-left-color: var(--conwy-ramp-2, #31597c); background-color: color-mix(in srgb, var(--conwy-ramp-2, #31597c) 8%, white); }
-.category-tiles .col:nth-of-type(6n+3) .category-tile { border-left-color: var(--conwy-ramp-3, #158ab5); background-color: color-mix(in srgb, var(--conwy-ramp-3, #158ab5) 8%, white); }
-.category-tiles .col:nth-of-type(6n+4) .category-tile { border-left-color: var(--conwy-ramp-4, #1da6be); background-color: color-mix(in srgb, var(--conwy-ramp-4, #1da6be) 8%, white); }
-.category-tiles .col:nth-of-type(6n+5) .category-tile { border-left-color: var(--conwy-ramp-5, #24b7ba); background-color: color-mix(in srgb, var(--conwy-ramp-5, #24b7ba) 8%, white); }
-.category-tiles .col:nth-of-type(6n+6) .category-tile { border-left-color: var(--conwy-ramp-6, #29b5a3); background-color: color-mix(in srgb, var(--conwy-ramp-6, #29b5a3) 8%, white); }
+.category-tiles .col:nth-of-type(6n+1) .category-tile { border-left-color: var(--conwy-ramp-1, #565f90); background-color: color-mix(in srgb, var(--conwy-ramp-1, #565f90) 8%, var(--bs-body-bg, white)); }
+.category-tiles .col:nth-of-type(6n+2) .category-tile { border-left-color: var(--conwy-ramp-2, #31597c); background-color: color-mix(in srgb, var(--conwy-ramp-2, #31597c) 8%, var(--bs-body-bg, white)); }
+.category-tiles .col:nth-of-type(6n+3) .category-tile { border-left-color: var(--conwy-ramp-3, #158ab5); background-color: color-mix(in srgb, var(--conwy-ramp-3, #158ab5) 8%, var(--bs-body-bg, white)); }
+.category-tiles .col:nth-of-type(6n+4) .category-tile { border-left-color: var(--conwy-ramp-4, #1da6be); background-color: color-mix(in srgb, var(--conwy-ramp-4, #1da6be) 8%, var(--bs-body-bg, white)); }
+.category-tiles .col:nth-of-type(6n+5) .category-tile { border-left-color: var(--conwy-ramp-5, #24b7ba); background-color: color-mix(in srgb, var(--conwy-ramp-5, #24b7ba) 8%, var(--bs-body-bg, white)); }
+.category-tiles .col:nth-of-type(6n+6) .category-tile { border-left-color: var(--conwy-ramp-6, #29b5a3); background-color: color-mix(in srgb, var(--conwy-ramp-6, #29b5a3) 8%, var(--bs-body-bg, white)); }
