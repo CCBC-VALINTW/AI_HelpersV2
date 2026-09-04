@@ -34,6 +34,12 @@ public class LlmDefinition
 
     public bool SupportsReasoning { get; set; }
     public int? ReasoningTokens { get; set; }
+    /// <summary>Anthropic's newer "adaptive thinking" (Claude Sonnet 5 confirmed so far) can't be
+    /// disabled and isn't controlled by a token budget - effort is a separate dial instead. Only
+    /// meaningful when SupportsReasoning is true; see BedrockAdapter for the two different request
+    /// shapes this selects between. Defaults to false (the older enable/budget_tokens shape) so
+    /// every existing reasoning-capable row keeps its current behaviour unless explicitly flipped.</summary>
+    public bool UsesAdaptiveThinking { get; set; }
 
     public ModelResidency Residency { get; set; } = ModelResidency.Global;
 

@@ -214,35 +214,77 @@ public class BedrockAdapter(HttpClient httpClient, ICredentialStore credentialSt
                 })
         };
 
-        // When Effort engages reasoning, request thinking config.
+        // Always set maxTokens explicitly - Bedrock's Converse API silently defaults this to
+        // 4096 when it's omitted (confirmed with AWS Support against eu.anthropic.claude-sonnet-5:
+        // even though the model supports up to 128K output tokens, an unset maxTokens caps every
+        // response at 4096 regardless - and for a reasoning model specifically, thinking tokens are
+        // drawn from that SAME budget before any visible output is produced, so a real "thinking"
+        // response can exhaust the whole 4096 before writing a single word of the actual answer).
+        // model.MaxTokens is real migrated V1 data (may be unset for some rows); 16384 is AWS
+        // Support's own recommended floor to fall back to when there's no better figure to use.
+        body["inferenceConfig"] = new JsonObject
+        {
+            ["maxTokens"] = model.MaxTokens ?? 16384
+        };
+
+        // When Effort engages reasoning, request thinking config. Two different real Bedrock
+        // shapes here, not one - confirmed with AWS Support (case referencing
+        // eu.anthropic.claude-sonnet-5): Claude 5-family adaptive thinking can't be disabled and
+        // isn't controlled by a token budget at all, unlike the older extended-thinking models
+        // this code originally targeted. Sending the old enable/budget_tokens shape to an
+        // adaptive-thinking model is untested against a real call - UsesAdaptiveThinking exists
+        // specifically so this never happens by accident to a model that wasn't confirmed to want it.
         if (helper.Effort is { } effort && model.SupportsReasoning)
         {
-            var maxBudget = model.ReasoningTokens ?? 4096;
-            var budgetTokens = effort switch
+            if (model.UsesAdaptiveThinking)
             {
-                EffortLevel.Low => (int)(maxBudget * 0.25),
-                EffortLevel.Medium => (int)(maxBudget * 0.5),
-                EffortLevel.High => maxBudget,
-                _ => maxBudget
-            };
-
-            body["additionalModelRequestFields"] = new JsonObject
-            {
-                ["thinking"] = new JsonObject
+                body["additionalModelRequestFields"] = new JsonObject
                 {
-                    ["type"] = "enabled",
-                    ["budget_tokens"] = budgetTokens
-                }
-            };
+                    ["thinking"] = new JsonObject { ["type"] = "adaptive" },
+                    ["output_config"] = new JsonObject
+                    {
+                        ["effort"] = effort switch
+                        {
+                            EffortLevel.Low => "low",
+                            EffortLevel.Medium => "medium",
+                            EffortLevel.High => "high",
+                            _ => "medium"
+                        }
+                    }
+                };
+            }
+            else
+            {
+                var maxBudget = model.ReasoningTokens ?? 4096;
+                var budgetTokens = effort switch
+                {
+                    EffortLevel.Low => (int)(maxBudget * 0.25),
+                    EffortLevel.Medium => (int)(maxBudget * 0.5),
+                    EffortLevel.High => maxBudget,
+                    _ => maxBudget
+                };
+
+                body["additionalModelRequestFields"] = new JsonObject
+                {
+                    ["thinking"] = new JsonObject
+                    {
+                        ["type"] = "enabled",
+                        ["budget_tokens"] = budgetTokens
+                    }
+                };
+            }
         }
 
-        // Deliberately never send temperature/top_p (Creativity/Adherence) - Will already went
-        // through this exact fight in V1 and concluded it wasn't worth it: different Bedrock
-        // models reject sampling params in different, inconsistent ways (some reject them
-        // entirely, some reject temperature+top_p together but accept one, presumably more
-        // variations exist). Rather than chase each one as it surfaces, models just use their
-        // own defaults. Creativity/Adherence stay in the schema (real V1 data, may matter for a
-        // future non-Bedrock provider) but Bedrock calls never reference them.
+        // Deliberately never send temperature/top_p (Creativity/Adherence) as part of
+        // inferenceConfig, even though maxTokens now lives there too - Will already went through
+        // this exact fight in V1 and concluded it wasn't worth it: different Bedrock models reject
+        // sampling params in different, inconsistent ways (some reject them entirely, some reject
+        // temperature+top_p together but accept one, presumably more variations exist). Rather
+        // than chase each one as it surfaces, models just use their own defaults. Creativity/
+        // Adherence stay in the schema (real V1 data, may matter for a future non-Bedrock
+        // provider) but Bedrock calls never reference them. maxTokens doesn't carry this same
+        // per-model rejection risk - it's a universally-supported field, not a sampling param -
+        // which is why it gets sent unconditionally above while temperature/top_p still don't.
 
         return body;
     }
