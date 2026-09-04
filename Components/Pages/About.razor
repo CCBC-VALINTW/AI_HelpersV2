@@ -1,0 +1,93 @@
+@page "/about"
+@rendermode InteractiveServer
+
+<PageTitle>About</PageTitle>
+
+<h1>About AI Helpers</h1>
+<p class="text-muted">
+    Version @Current.Version - released @Current.ReleasedAt.ToString("d MMMM yyyy, HH:mm")
+</p>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <h2 class="h5">What is this?</h2>
+        <p>
+            AI Helpers is a Conwy County Borough Council tool that uses artificial intelligence to
+            help council staff draft documents, reports, letters and other written content more
+            quickly. Instead of starting from a blank page, you pick a "Helper" set up for a
+            particular task - for example, drafting a committee report or a residents' letter -
+            give it some information, and it generates a first draft for you to review, edit and
+            use.
+        </p>
+        <p class="mb-0">
+            Every Helper is set up by the council for a specific purpose, and the AI never
+            publishes anything on its own - a person always reviews the output before it's used,
+            which is why every generated document includes a review checklist at the end.
+        </p>
+    </div>
+</div>
+
+<h2 class="h5">What's new</h2>
+<p class="text-muted small">A plain-English summary of what's changed, release by release (newest first).</p>
+
+@foreach (var release in Releases)
+{
+    <div class="mb-4">
+        <h3 class="h6 mb-1">
+            Version @release.Version
+            <span class="text-muted fw-normal">- @release.ReleasedAt.ToString("d MMMM yyyy")</span>
+        </h3>
+        <ul class="mb-0">
+            @foreach (var highlight in release.Highlights)
+            {
+                <li>@highlight</li>
+            }
+        </ul>
+    </div>
+}
+
+@code {
+    // Deliberately hand-curated in plain English, not generated from git history - a real commit
+    // log ("Fix Data Protection cert generation to force CNG key storage") means nothing to a
+    // non-technical reader. Add a new entry at the TOP of this list (newest first) whenever a
+    // meaningful batch of user-facing work is ready to call a "release" - there's no build-number
+    // or CI tie-in, this is just a summary someone chooses to write, matching what this page asks
+    // for. ReleasedAt is a real timestamp (the last commit actually included in that version, at
+    // the time this entry was written), not a live clock.
+    private record ReleaseNote(string Version, DateTime ReleasedAt, IReadOnlyList<string> Highlights);
+
+    private static ReleaseNote Current => Releases[0];
+
+    private static readonly List<ReleaseNote> Releases =
+    [
+        new("1.4", new DateTime(2026, 9, 4, 9, 15, 0),
+        [
+            "Fixed an issue where longer AI-generated responses could sometimes get cut off partway through.",
+            "Small visual polish to the Helpers page."
+        ]),
+        new("1.3", new DateTime(2026, 9, 3, 18, 0, 0),
+        [
+            "Helpers can now be connected (by an administrator) to live council data, so their answers can automatically include up-to-date information.",
+            "Added a safety net that keeps a temporary copy of anything a Helper generates for 7 days, in case you navigate away before saving it."
+        ]),
+        new("1.2", new DateTime(2026, 9, 2, 18, 0, 0),
+        [
+            "Helpers can now ask you a few quick questions before running, so they can tailor their output to your specific situation.",
+            "Helpers can now read the content of a web page you give them, not just uploaded files.",
+            "Added a running total of your monthly AI usage allowance.",
+            "Improved colour contrast throughout the app to make it easier to read.",
+            "Numerous smaller fixes to document editing and page reliability."
+        ]),
+        new("1.1", new DateTime(2026, 8, 28, 18, 0, 0),
+        [
+            "Added a Helper Editor, so authorised staff can create and adjust their own Helpers.",
+            "You can now save documents a Helper has generated, and export them as Word, PDF, or a webpage.",
+            "Added a dedicated editor for polishing a document before saving it."
+        ]),
+        new("1.0", new DateTime(2026, 8, 26, 18, 0, 0),
+        [
+            "First working version: sign in securely with your council account, browse the available Helpers, and generate real AI-assisted documents.",
+            "Applied Conwy's corporate colours and branding throughout."
+        ])
+    ];
+}
