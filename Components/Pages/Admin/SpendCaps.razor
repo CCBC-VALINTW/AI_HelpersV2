@@ -1,0 +1,250 @@
+@* Hosted as a tab inside Admin.razor, not independently routed - see that file's own comment. *@
+@using AiHelpers.Data
+@using AiHelpers.Data.Entities
+@using Microsoft.EntityFrameworkCore
+@inject AppDbContext Db
+
+<PageTitle>Admin - Spend Caps</PageTitle>
+
+<p class="text-muted">
+    Each user's monthly AI spend counts against a cap (converted to GBP and discounted the same
+    way the top status bar and cap enforcement itself do - see the note below the table). Anyone
+    without a row here is on the default cap of £@(DefaultCapAmount.ToString("0.00")).
+</p>
+
+@if (_loading)
+{
+    <p><em>Loading…</em></p>
+}
+else
+{
+    <div class="card mb-4">
+        <div class="card-header">Users seen this month, or with a cap set</div>
+        <div class="card-body p-0">
+            @if (_rows.Count == 0)
+            {
+                <p class="text-muted p-3 mb-0">No spend recorded this month, and no caps configured.</p>
+            }
+            else
+            {
+                <table class="table align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>User</th>
+                            <th class="text-end">Spend this month</th>
+                            <th style="width: 12rem;">Monthly cap (£)</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in _rows)
+                        {
+                            <tr>
+                                <td>
+                                    @row.UserId
+                                    @if (!row.HasExplicitCap)
+                                    {
+                                        <span class="badge text-bg-light text-muted ms-1">default</span>
+                                    }
+                                </td>
+                                <td class="text-end @(row.SpendCountedGbp > row.CapAmount ? "text-danger fw-semibold" : "")">
+                                    £@(row.SpendCountedGbp.ToString("0.00"))
+                                </td>
+                                <td>
+                                    <input type="number" min="0" step="0.01" class="form-control form-control-sm"
+                                           value="@row.CapAmount" @onchange="e => OnCapInputChanged(row, e.Value)" />
+                                </td>
+                                <td class="text-end">
+                                    <button type="button" class="btn btn-outline-primary btn-sm me-1"
+                                            disabled="@(row.Saving || !row.Dirty)" @onclick="() => SaveAsync(row)">
+                                        @(row.Saving ? "Saving…" : "Save")
+                                    </button>
+                                    @if (row.HasExplicitCap)
+                                    {
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@row.Saving" @onclick="() => ResetToDefaultAsync(row)">
+                                            Reset to default
+                                        </button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">Set a cap for another user</div>
+        <div class="card-body">
+            <div class="row g-2 align-items-end">
+                <div class="col-sm-6">
+                    <label class="form-label" for="newCapEmail">Email</label>
+                    <input id="newCapEmail" class="form-control" placeholder="name@conwy.gov.uk" @bind="_newEmail" />
+                </div>
+                <div class="col-sm-3">
+                    <label class="form-label" for="newCapAmount">Monthly cap (£)</label>
+                    <input id="newCapAmount" type="number" min="0" step="0.01" class="form-control" @bind="_newCapAmount" />
+                </div>
+                <div class="col-sm-3">
+                    <button type="button" class="btn btn-primary w-100" disabled="@_addingNew" @onclick="AddNewAsync">
+                        @(_addingNew ? "Adding…" : "Add")
+                    </button>
+                </div>
+            </div>
+            @if (_addError is not null)
+            {
+                <div class="alert alert-danger mt-3 mb-0">@_addError</div>
+            }
+        </div>
+    </div>
+
+    <p class="text-muted small mt-3 mb-0">
+        "Spend this month" here is the same figure the cap is actually enforced against - real USD
+        spend converted to GBP at a fixed @((UsdToGbpRate * 100).ToString("0"))% rate, then only
+        @((CapCountingRate * 100).ToString("0"))% of that counted (everyone's built-in headroom
+        buffer) - see <code>SpendStatusService</code>. That's why it won't match the real-GBP totals
+        on the Cost Report tab.
+    </p>
+}
+
+@code {
+    // Duplicated from SpendStatusService deliberately, not shared via a method call into it - this
+    // page exists specifically to show spend the way it's actually enforced against the cap, same
+    // reasoning CostReport.razor gives for its own (different) duplicate of UsdToGbpRate alone.
+    private const decimal UsdToGbpRate = 0.8m;
+    private const decimal CapCountingRate = 0.8m;
+    private const decimal DefaultCapAmount = 1.0m;
+
+    private bool _loading = true;
+    private List<Row> _rows = [];
+    private string _newEmail = "";
+    private decimal _newCapAmount = DefaultCapAmount;
+    private bool _addingNew;
+    private string? _addError;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+
+        var monthStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        var spendByUser = await Db.AccountingEntries
+            .Where(a => a.Timestamp >= monthStart)
+            .GroupBy(a => a.UserId)
+            .Select(g => new { UserId = g.Key, UsdCost = g.Sum(a => a.UsdCost) })
+            .ToDictionaryAsync(g => g.UserId, g => g.UsdCost);
+
+        var caps = await Db.SpendCaps.ToDictionaryAsync(c => c.UserId, c => c.MonthlyCapAmount);
+
+        var userIds = spendByUser.Keys.Union(caps.Keys, StringComparer.OrdinalIgnoreCase).OrderBy(u => u);
+
+        _rows = [.. userIds.Select(userId =>
+        {
+            var hasCap = caps.TryGetValue(userId, out var capAmount);
+            var rawUsd = spendByUser.GetValueOrDefault(userId);
+            return new Row
+            {
+                UserId = userId,
+                SpendCountedGbp = rawUsd * UsdToGbpRate * CapCountingRate,
+                CapAmount = hasCap ? capAmount : DefaultCapAmount,
+                HasExplicitCap = hasCap
+            };
+        })];
+
+        _loading = false;
+    }
+
+    private void OnCapInputChanged(Row row, object? value)
+    {
+        if (decimal.TryParse(value?.ToString(), out var amount) && amount >= 0)
+        {
+            row.CapAmount = amount;
+            row.Dirty = true;
+        }
+    }
+
+    private async Task SaveAsync(Row row)
+    {
+        row.Saving = true;
+
+        var entity = await Db.SpendCaps.FirstOrDefaultAsync(c => c.UserId == row.UserId);
+        if (entity is null)
+        {
+            Db.SpendCaps.Add(new SpendCap { UserId = row.UserId, MonthlyCapAmount = row.CapAmount });
+        }
+        else
+        {
+            entity.MonthlyCapAmount = row.CapAmount;
+        }
+        await Db.SaveChangesAsync();
+
+        row.HasExplicitCap = true;
+        row.Dirty = false;
+        row.Saving = false;
+    }
+
+    private async Task ResetToDefaultAsync(Row row)
+    {
+        row.Saving = true;
+
+        var entity = await Db.SpendCaps.FirstOrDefaultAsync(c => c.UserId == row.UserId);
+        if (entity is not null)
+        {
+            Db.SpendCaps.Remove(entity);
+            await Db.SaveChangesAsync();
+        }
+
+        row.CapAmount = DefaultCapAmount;
+        row.HasExplicitCap = false;
+        row.Dirty = false;
+        row.Saving = false;
+    }
+
+    private async Task AddNewAsync()
+    {
+        _addError = null;
+        var email = _newEmail.Trim();
+
+        if (email.Length == 0)
+        {
+            _addError = "Email is required.";
+            return;
+        }
+        if (_newCapAmount < 0)
+        {
+            _addError = "Monthly cap can't be negative.";
+            return;
+        }
+
+        _addingNew = true;
+
+        var entity = await Db.SpendCaps.FirstOrDefaultAsync(c => c.UserId == email);
+        if (entity is null)
+        {
+            Db.SpendCaps.Add(new SpendCap { UserId = email, MonthlyCapAmount = _newCapAmount });
+        }
+        else
+        {
+            entity.MonthlyCapAmount = _newCapAmount;
+        }
+        await Db.SaveChangesAsync();
+
+        _newEmail = "";
+        _newCapAmount = DefaultCapAmount;
+        _addingNew = false;
+        await LoadAsync();
+    }
+
+    private class Row
+    {
+        public required string UserId { get; set; }
+        public decimal SpendCountedGbp { get; set; }
+        public decimal CapAmount { get; set; }
+        public bool HasExplicitCap { get; set; }
+        public bool Dirty { get; set; }
+        public bool Saving { get; set; }
+    }
+}

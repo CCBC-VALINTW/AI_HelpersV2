@@ -26,6 +26,9 @@
     <li class="nav-item">
         <button type="button" class="nav-link @(_activeTab == AdminTab.CostReport ? "active" : "")" @onclick="() => _activeTab = AdminTab.CostReport">Cost Report</button>
     </li>
+    <li class="nav-item">
+        <button type="button" class="nav-link @(_activeTab == AdminTab.SpendCaps ? "active" : "")" @onclick="() => _activeTab = AdminTab.SpendCaps">Spend Caps</button>
+    </li>
 </ul>
 
 <div class="admin-panel">
@@ -58,11 +61,15 @@
     {
         <CostReport />
     }
+    else if (_activeTab == AdminTab.SpendCaps)
+    {
+        <SpendCaps />
+    }
 </div>
 
 @code {
     // No URL/query-string reflection of the active tab - matches HelperEditor.razor's own
     // EditorTab precedent exactly (client-side field only, no deep-linking to a specific tab).
-    private enum AdminTab { Credentials, DataConnections, Admins, LlmDefinitions, Stylesheets, CostReport }
+    private enum AdminTab { Credentials, DataConnections, Admins, LlmDefinitions, Stylesheets, CostReport, SpendCaps }
     private AdminTab _activeTab = AdminTab.Credentials;
 }
