@@ -4,6 +4,7 @@ using AiHelpers.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace AiHelpers.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260904120305_AddAdminUsersAndStylesheetAuditFields")]
+    partial class AddAdminUsersAndStylesheetAuditFields
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -42,7 +45,7 @@ namespace AiHelpers.Migrations
 
                     b.HasIndex("TimestampUtc");
 
-                    b.ToTable("AccessLogEntries", (string)null);
+                    b.ToTable("AccessLogEntries");
                 });
 
             modelBuilder.Entity("AiHelpers.Data.Entities.AccountingEntry", b =>
@@ -78,7 +81,7 @@ namespace AiHelpers.Migrations
 
                     b.HasIndex("UserId", "Timestamp");
 
-                    b.ToTable("AccountingEntries", (string)null);
+                    b.ToTable("AccountingEntries");
                 });
 
             modelBuilder.Entity("AiHelpers.Data.Entities.AdminUser", b =>
@@ -106,7 +109,7 @@ namespace AiHelpers.Migrations
                     b.HasIndex("Email")
                         .IsUnique();
 
-                    b.ToTable("AdminUsers", (string)null);
+                    b.ToTable("AdminUsers");
                 });
 
             modelBuilder.Entity("AiHelpers.Data.Entities.ArticleStoreItem", b =>
@@ -136,7 +139,7 @@ namespace AiHelpers.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ArticleStoreItems", (string)null);
+                    b.ToTable("ArticleStoreItems");
                 });
 
             modelBuilder.Entity("AiHelpers.Data.Entities.CallbackEntry", b =>
@@ -192,7 +195,7 @@ namespace AiHelpers.Migrations
 
                     b.HasIndex("CreatedByEmail", "CreatedAtUtc");
 
-                    b.ToTable("CallbackEntries", (string)null);
+                    b.ToTable("CallbackEntries");
                 });
 
             modelBuilder.Entity("AiHelpers.Data.Entities.DataConnection", b =>
@@ -243,7 +246,7 @@ namespace AiHelpers.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("DataConnections", (string)null);
+                    b.ToTable("DataConnections");
                 });
 
             modelBuilder.Entity("AiHelpers.Data.Entities.DataQueryExecutionLog", b =>
@@ -291,7 +294,7 @@ namespace AiHelpers.Migrations
 
                     b.HasIndex("TimestampUtc");
 
-                    b.ToTable("DataQueryExecutionLogs", (string)null);
+                    b.ToTable("DataQueryExecutionLogs");
                 });
 
             modelBuilder.Entity("AiHelpers.Data.Entities.Feedback", b =>
@@ -345,7 +348,7 @@ namespace AiHelpers.Migrations
 
                     b.HasIndex("HelperDefinitionId");
 
-                    b.ToTable("FeedbackEntries", (string)null);
+                    b.ToTable("FeedbackEntries");
                 });
 
             modelBuilder.Entity("AiHelpers.Data.Entities.GeneratedDocument", b =>
@@ -390,7 +393,7 @@ namespace AiHelpers.Migrations
 
                     b.HasIndex("StylesheetId");
 
-                    b.ToTable("GeneratedDocuments", (string)null);
+                    b.ToTable("GeneratedDocuments");
                 });
 
             modelBuilder.Entity("AiHelpers.Data.Entities.HelperCategory", b =>
@@ -412,7 +415,7 @@ namespace AiHelpers.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("HelperCategories", (string)null);
+                    b.ToTable("HelperCategories");
                 });
 
             modelBuilder.Entity("AiHelpers.Data.Entities.HelperContextQuestion", b =>
@@ -454,7 +457,7 @@ namespace AiHelpers.Migrations
 
                     b.HasIndex("HelperDefinitionId");
 
-                    b.ToTable("HelperContextQuestions", (string)null);
+                    b.ToTable("HelperContextQuestions");
                 });
 
             modelBuilder.Entity("AiHelpers.Data.Entities.HelperDataQuery", b =>
@@ -501,7 +504,7 @@ namespace AiHelpers.Migrations
 
                     b.HasIndex("HelperDefinitionId");
 
-                    b.ToTable("HelperDataQueries", (string)null);
+                    b.ToTable("HelperDataQueries");
                 });
 
             modelBuilder.Entity("AiHelpers.Data.Entities.HelperDefinition", b =>
@@ -618,7 +621,7 @@ namespace AiHelpers.Migrations
 
                     b.HasIndex("LlmDefinitionId");
 
-                    b.ToTable("HelperDefinitions", null, t =>
+                    b.ToTable("HelperDefinitions", t =>
                         {
                             t.HasCheckConstraint("CK_HelperDefinition_ExternalUrl", "([IsExternal] = 0 AND [ExternalUrl] IS NULL) OR ([IsExternal] = 1 AND [ExternalUrl] IS NOT NULL)");
                         });
@@ -650,7 +653,7 @@ namespace AiHelpers.Migrations
                     b.HasIndex("UserEmail", "HelperDefinitionId")
                         .IsUnique();
 
-                    b.ToTable("HelperFavorites", (string)null);
+                    b.ToTable("HelperFavorites");
                 });
 
             modelBuilder.Entity("AiHelpers.Data.Entities.LlmDefinition", b =>
@@ -730,7 +733,7 @@ namespace AiHelpers.Migrations
 
                     b.HasIndex("Identifier");
 
-                    b.ToTable("LlmDefinitions", (string)null);
+                    b.ToTable("LlmDefinitions");
                 });
 
             modelBuilder.Entity("AiHelpers.Data.Entities.PersonalityPrompt", b =>
@@ -772,7 +775,7 @@ namespace AiHelpers.Migrations
                     b.HasIndex("Email", "Name")
                         .IsUnique();
 
-                    b.ToTable("PersonalityPrompts", (string)null);
+                    b.ToTable("PersonalityPrompts");
                 });
 
             modelBuilder.Entity("AiHelpers.Data.Entities.ProviderCredential", b =>
@@ -813,7 +816,7 @@ namespace AiHelpers.Migrations
                         .IsUnique()
                         .HasFilter("[IsDefault] = 1");
 
-                    b.ToTable("ProviderCredentials", (string)null);
+                    b.ToTable("ProviderCredentials");
                 });
 
             modelBuilder.Entity("AiHelpers.Data.Entities.SpendCap", b =>
@@ -838,7 +841,7 @@ namespace AiHelpers.Migrations
                     b.HasIndex("UserId")
                         .IsUnique();
 
-                    b.ToTable("SpendCaps", (string)null);
+                    b.ToTable("SpendCaps");
                 });
 
             modelBuilder.Entity("AiHelpers.Data.Entities.Stylesheet", b =>
@@ -870,7 +873,7 @@ namespace AiHelpers.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Stylesheets", (string)null);
+                    b.ToTable("Stylesheets");
                 });
 
             modelBuilder.Entity("AiHelpers.Data.Entities.UserRoleInfo", b =>
@@ -896,7 +899,7 @@ namespace AiHelpers.Migrations
                     b.HasIndex("Email")
                         .IsUnique();
 
-                    b.ToTable("UserRoleInfos", (string)null);
+                    b.ToTable("UserRoleInfos");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey", b =>
@@ -915,7 +918,7 @@ namespace AiHelpers.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("DataProtectionKeys", (string)null);
+                    b.ToTable("DataProtectionKeys");
                 });
 
             modelBuilder.Entity("AiHelpers.Data.Entities.AccountingEntry", b =>

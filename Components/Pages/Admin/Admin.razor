@@ -1,0 +1,68 @@
+@page "/admin"
+@attribute [Authorize(Policy = "AdminOnly")]
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Authorization
+
+<PageTitle>Admin</PageTitle>
+
+<h1 class="mb-3">Admin</h1>
+
+<ul class="nav nav-pills admin-tabs mb-3">
+    <li class="nav-item">
+        <button type="button" class="nav-link @(_activeTab == AdminTab.Credentials ? "active" : "")" @onclick="() => _activeTab = AdminTab.Credentials">Credentials</button>
+    </li>
+    <li class="nav-item">
+        <button type="button" class="nav-link @(_activeTab == AdminTab.DataConnections ? "active" : "")" @onclick="() => _activeTab = AdminTab.DataConnections">Data Connections</button>
+    </li>
+    <li class="nav-item">
+        <button type="button" class="nav-link @(_activeTab == AdminTab.Admins ? "active" : "")" @onclick="() => _activeTab = AdminTab.Admins">Admins</button>
+    </li>
+    <li class="nav-item">
+        <button type="button" class="nav-link @(_activeTab == AdminTab.LlmDefinitions ? "active" : "")" @onclick="() => _activeTab = AdminTab.LlmDefinitions">LLM Definitions</button>
+    </li>
+    <li class="nav-item">
+        <button type="button" class="nav-link @(_activeTab == AdminTab.Stylesheets ? "active" : "")" @onclick="() => _activeTab = AdminTab.Stylesheets">Stylesheets</button>
+    </li>
+    <li class="nav-item">
+        <button type="button" class="nav-link @(_activeTab == AdminTab.CostReport ? "active" : "")" @onclick="() => _activeTab = AdminTab.CostReport">Cost Report</button>
+    </li>
+</ul>
+
+<div class="admin-panel">
+    @* Conditionally rendered, not hidden via CSS - each panel is its own component with its own
+       OnInitializedAsync DB load, same as when these were separate pages you navigated between.
+       Switching tabs tears down and recreates the previous panel (fresh data every time you
+       return to a tab), matching the "always current" behaviour full page navigation already had -
+       not a regression, just a different hosting mechanism for the same components. *@
+    @if (_activeTab == AdminTab.Credentials)
+    {
+        <Credentials />
+    }
+    else if (_activeTab == AdminTab.DataConnections)
+    {
+        <DataConnections />
+    }
+    else if (_activeTab == AdminTab.Admins)
+    {
+        <AdminUsers />
+    }
+    else if (_activeTab == AdminTab.LlmDefinitions)
+    {
+        <LlmDefinitions />
+    }
+    else if (_activeTab == AdminTab.Stylesheets)
+    {
+        <Stylesheets />
+    }
+    else if (_activeTab == AdminTab.CostReport)
+    {
+        <CostReport />
+    }
+</div>
+
+@code {
+    // No URL/query-string reflection of the active tab - matches HelperEditor.razor's own
+    // EditorTab precedent exactly (client-side field only, no deep-linking to a specific tab).
+    private enum AdminTab { Credentials, DataConnections, Admins, LlmDefinitions, Stylesheets, CostReport }
+    private AdminTab _activeTab = AdminTab.Credentials;
+}

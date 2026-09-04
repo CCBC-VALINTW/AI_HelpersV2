@@ -220,7 +220,7 @@ needs re-saving once, from any machine, after this switch** — a brand new key 
 ciphertext genuinely can't decrypt anymore, same "re-enter it" step as before, just a one-time
 transition rather than an ongoing per-machine tax:
 
-- [ ] Sign in as admin → `/admin/credentials` → re-enter the AWS Bedrock bearer token.
+- [ ] Sign in as admin → `/admin` (Credentials tab) → re-enter the AWS Bedrock bearer token.
 
 **Noisy but harmless, one-time**: on the first boot after switching, you may still see a
 `fail:`/`warn:` block from `Microsoft.AspNetCore.DataProtection.*` about an old DPAPI-protected
@@ -228,7 +228,8 @@ key being "ineligible", followed by a fresh certificate-protected key being mint
 that one transition, not an ongoing thing now that every machine shares the same cert.
 
 **A real, separate bug found trying to re-enter the credential, fixed along the way**:
-`/admin/credentials` itself threw a `CryptographicException` on load (it decrypts the existing
+The Credentials page (at `/admin/credentials` at the time, since folded into a tab under `/admin`)
+itself threw a `CryptographicException` on load (it decrypts the existing
 credential just to show a masked "currently set: ****1234" preview) — meaning the page you need
 to fix a stale credential couldn't be reached at all. Fixed in `Components/Pages/Admin/Credentials.razor`
 — the decrypt-for-preview call is wrapped in a try/catch, falling back to a warning banner instead

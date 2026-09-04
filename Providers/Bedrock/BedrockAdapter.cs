@@ -105,7 +105,7 @@ public class BedrockAdapter(HttpClient httpClient, ICredentialStore credentialSt
     public async Task<LlmInvocationResult> InvokeAsync(LlmInvocationRequest request, CancellationToken cancellationToken = default)
     {
         var credential = await credentialStore.GetDefaultAsync<AwsCredentialPayload>(LlmProvider.AwsBedrock, cancellationToken)
-            ?? throw new InvalidOperationException("No AWS Bedrock credential is configured. Set one at /admin/credentials.");
+            ?? throw new InvalidOperationException("No AWS Bedrock credential is configured. Set one at /admin (Credentials tab).");
 
         if (credential.BearerToken is null)
         {

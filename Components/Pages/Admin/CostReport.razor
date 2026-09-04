@@ -1,0 +1,204 @@
+@* Hosted as a tab inside Admin.razor, not independently routed - see that file's own comment. *@
+@using AiHelpers.Data
+@using Microsoft.EntityFrameworkCore
+@inject AppDbContext Db
+
+<PageTitle>Admin - Cost Report</PageTitle>
+
+<p class="text-muted">
+    Real AWS spend, converted to GBP at a fixed @((UsdToGbpRate * 100).ToString("0"))% rate (see
+    the note on the top status bar's own spend figure) - this is a reporting view, not a live
+    exchange-rate lookup, so treat it as indicative rather than exact to the penny.
+</p>
+
+<div class="mb-4" style="max-width: 16rem;">
+    <label class="form-label" for="rangeSelect">Period</label>
+    <select id="rangeSelect" class="form-select" value="@_selectedRange" @onchange="OnRangeChangedAsync">
+        <option value="month">This month</option>
+        <option value="30d">Last 30 days</option>
+        <option value="90d">Last 90 days</option>
+        <option value="all">All time</option>
+    </select>
+</div>
+
+@if (_loading)
+{
+    <p><em>Loading…</em></p>
+}
+else
+{
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="text-muted small text-uppercase mb-1">Total spend, selected period</div>
+            <div class="fs-2 fw-semibold">£@((_totalUsd * UsdToGbpRate).ToString("0.00"))</div>
+        </div>
+    </div>
+
+    <div class="row g-4 mb-4">
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">By user</div>
+                <div class="card-body p-0">
+                    @if (_byUser.Count == 0)
+                    {
+                        <p class="text-muted p-3 mb-0">No spend recorded in this period.</p>
+                    }
+                    else
+                    {
+                        <table class="table align-middle mb-0">
+                            <thead><tr><th>User</th><th class="text-end">Spend</th><th class="text-end">%</th></tr></thead>
+                            <tbody>
+                                @foreach (var row in _byUser)
+                                {
+                                    <tr>
+                                        <td>@row.Label</td>
+                                        <td class="text-end">£@((row.UsdCost * UsdToGbpRate).ToString("0.00"))</td>
+                                        <td class="text-end text-muted">@SharePercent(row.UsdCost)%</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">By Helper</div>
+                <div class="card-body p-0">
+                    @if (_byHelper.Count == 0)
+                    {
+                        <p class="text-muted p-3 mb-0">No spend recorded in this period.</p>
+                    }
+                    else
+                    {
+                        <table class="table align-middle mb-0">
+                            <thead><tr><th>Helper</th><th class="text-end">Spend</th><th class="text-end">%</th></tr></thead>
+                            <tbody>
+                                @foreach (var row in _byHelper)
+                                {
+                                    <tr>
+                                        <td>@row.Label</td>
+                                        <td class="text-end">£@((row.UsdCost * UsdToGbpRate).ToString("0.00"))</td>
+                                        <td class="text-end text-muted">@SharePercent(row.UsdCost)%</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">Trend - last 6 months</div>
+        <div class="card-body">
+            @if (_monthlyTrend.All(m => m.UsdCost == 0))
+            {
+                <p class="text-muted mb-0">No spend recorded in the last 6 months.</p>
+            }
+            else
+            {
+                var maxUsd = _monthlyTrend.Max(m => m.UsdCost);
+                @foreach (var m in _monthlyTrend)
+                {
+                    var pct = maxUsd == 0 ? 0 : (double)(m.UsdCost / maxUsd) * 100;
+                    <div class="d-flex align-items-center gap-2 mb-2">
+                        <div class="text-muted small trend-month">@m.Month.ToString("MMM yyyy")</div>
+                        <div class="flex-grow-1 bg-light rounded trend-track">
+                            <div class="bg-primary rounded trend-bar" style="width: @(pct.ToString("0.##"))%;"></div>
+                        </div>
+                        <div class="text-end small trend-value">£@((m.UsdCost * UsdToGbpRate).ToString("0.00"))</div>
+                    </div>
+                }
+            }
+        </div>
+    </div>
+}
+
+@code {
+    // Duplicated from SpendStatusService deliberately, not shared via a method call into it -
+    // that service's own CurrentSpend also bakes in CapCountingRate (a completely unrelated
+    // spend-policy discount, see its own comment), which a general cost report must NOT apply -
+    // this figure needs to be real GBP spend, not spend-against-cap.
+    private const decimal UsdToGbpRate = 0.8m;
+
+    private bool _loading = true;
+    private string _selectedRange = "month";
+    private decimal _totalUsd;
+    private List<SpendRow> _byUser = [];
+    private List<SpendRow> _byHelper = [];
+    private List<MonthSpend> _monthlyTrend = [];
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task OnRangeChangedAsync(ChangeEventArgs e)
+    {
+        _selectedRange = e.Value?.ToString() ?? "month";
+        await LoadAsync();
+    }
+
+    private DateTime RangeStartUtc => _selectedRange switch
+    {
+        "30d" => DateTime.UtcNow.AddDays(-30),
+        "90d" => DateTime.UtcNow.AddDays(-90),
+        "all" => DateTime.MinValue,
+        _ => new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1, 0, 0, 0, DateTimeKind.Utc)
+    };
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var start = RangeStartUtc;
+
+        _totalUsd = await Db.AccountingEntries.Where(a => a.Timestamp >= start).SumAsync(a => (decimal?)a.UsdCost) ?? 0m;
+
+        // Projected into a plain anonymous type, not straight into the SpendRow record - EF Core
+        // translates GroupBy+Sum into an anonymous-type projection unambiguously; a record
+        // constructor as the direct projection target is less certain to translate depending on
+        // provider/version, and this couldn't be verified against a live query here (Entra
+        // sign-in blocks reaching an authenticated page from this environment). SpendRow itself is
+        // only ever constructed client-side, after materialization.
+        _byUser = [.. (await Db.AccountingEntries
+            .Where(a => a.Timestamp >= start)
+            .GroupBy(a => a.UserId)
+            .Select(g => new { Label = g.Key, UsdCost = g.Sum(a => a.UsdCost) })
+            .ToListAsync())
+            .OrderByDescending(r => r.UsdCost)
+            .Select(r => new SpendRow(r.Label, r.UsdCost))];
+
+        _byHelper = [.. (await Db.AccountingEntries
+            .Where(a => a.Timestamp >= start)
+            .GroupBy(a => a.HelperName ?? "(unknown)")
+            .Select(g => new { Label = g.Key, UsdCost = g.Sum(a => a.UsdCost) })
+            .ToListAsync())
+            .OrderByDescending(r => r.UsdCost)
+            .Select(r => new SpendRow(r.Label, r.UsdCost))];
+
+        // Always the trailing 6 calendar months regardless of the period filter above - a trend
+        // is about the shape of spend over time, not a narrow selected window. Bucketed in memory
+        // (not a GroupBy-by-month EF query) since translating "group by calendar month" to SQL is
+        // fiddly across providers and this app's real row volume doesn't need it pushed down.
+        var trendStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(-5);
+        var trendEntries = await Db.AccountingEntries
+            .Where(a => a.Timestamp >= trendStart)
+            .Select(a => new { a.Timestamp, a.UsdCost })
+            .ToListAsync();
+
+        _monthlyTrend = Enumerable.Range(0, 6)
+            .Select(i => trendStart.AddMonths(i))
+            .Select(monthStart => new MonthSpend(
+                monthStart,
+                trendEntries.Where(a => a.Timestamp >= monthStart && a.Timestamp < monthStart.AddMonths(1)).Sum(a => a.UsdCost)))
+            .ToList();
+
+        _loading = false;
+    }
+
+    private string SharePercent(decimal usdCost) =>
+        _totalUsd == 0 ? "0" : (usdCost / _totalUsd * 100).ToString("0.#");
+
+    private record SpendRow(string Label, decimal UsdCost);
+    private record MonthSpend(DateTime Month, decimal UsdCost);
+}

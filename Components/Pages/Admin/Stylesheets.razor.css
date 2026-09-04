@@ -1,0 +1,7 @@
+/* Sized to sit comfortably next to the CSS textarea (both in a col-lg-6) rather than dominating
+   the page - this is a "does it look right" check, not the primary content the admin is editing. */
+.stylesheet-preview {
+    width: 100%;
+    height: 20rem;
+    background-color: #fff;
+}

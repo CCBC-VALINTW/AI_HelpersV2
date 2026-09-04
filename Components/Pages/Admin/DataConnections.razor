@@ -1,20 +1,16 @@
-@page "/admin/data-connections"
-@attribute [Authorize(Policy = "AdminOnly")]
-@rendermode InteractiveServer
+@* Hosted as a tab inside Admin.razor, not independently routed - see that file's own comment. *@
 @using System.ComponentModel.DataAnnotations
 @using AiHelpers.Data
 @using AiHelpers.Data.Entities
 @using AiHelpers.Data.Enums
 @using AiHelpers.Services
-@using Microsoft.AspNetCore.Authorization
 @using Microsoft.EntityFrameworkCore
 @inject AppDbContext Db
 @inject IDataQueryService DataQuery
 @inject ICurrentUserService CurrentUser
 
-<PageTitle>Data Connections</PageTitle>
+<PageTitle>Admin - Data Connections</PageTitle>
 
-<h1>Data Connections</h1>
 <p class="text-muted">
     ODBC connections a Helper can query for live data (see Data Sources on the Helper Editor).
     <strong>Use an account with least-privilege, read-only access to whatever this connects to</strong> -

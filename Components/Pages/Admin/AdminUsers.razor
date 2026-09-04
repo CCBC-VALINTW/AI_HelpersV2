@@ -1,0 +1,143 @@
+@* Hosted as a tab inside Admin.razor, not independently routed - see that file's own comment.
+   Named AdminUsers.razor (not Admins.razor) specifically to avoid confusion with that shell
+   page - "Admin" vs "Admins" is too close for two files that sit right next to each other. *@
+@using System.ComponentModel.DataAnnotations
+@using AiHelpers.Data
+@using AiHelpers.Data.Entities
+@using AiHelpers.Services
+@using Microsoft.EntityFrameworkCore
+@inject AppDbContext Db
+@inject ICurrentUserService CurrentUser
+@inject IConfiguration Configuration
+
+<PageTitle>Admin - Admins</PageTitle>
+
+<p class="text-muted">
+    Who can reach every admin page (this one included) and manage credentials, data connections,
+    models, stylesheets and cost reporting.
+</p>
+
+@if (_loading)
+{
+    <p><em>Loading…</em></p>
+}
+else
+{
+    @if (_configAdmins.Count > 0)
+    {
+        <div class="alert alert-secondary">
+            <strong>Always an admin, regardless of the list below:</strong> @string.Join(", ", _configAdmins)
+            - configured directly on the server, not editable here. This is a deliberate safety net
+            so admin access can never be fully locked out through this page alone.
+        </div>
+    }
+
+    <div class="card mb-4">
+        <div class="card-header">Additional admins</div>
+        <div class="card-body p-0">
+            @if (_admins.Count == 0)
+            {
+                <p class="text-muted p-3 mb-0">No additional admins added yet.</p>
+            }
+            else
+            {
+                <table class="table align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Email</th>
+                            <th>Added</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var a in _admins)
+                        {
+                            <tr>
+                                <td>@a.Email</td>
+                                <td class="text-muted small">@a.CreatedAtUtc.ToLocalTime().ToString("g")<br />@a.CreatedBy</td>
+                                <td class="text-end">
+                                    <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => DeleteAsync(a)">Remove</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">Add an admin</div>
+        <div class="card-body">
+            <EditForm Model="_form" OnValidSubmit="SaveAsync">
+                <DataAnnotationsValidator />
+                <div class="mb-3">
+                    <label class="form-label" for="adminEmail">Email</label>
+                    <InputText id="adminEmail" class="form-control" @bind-Value="_form.Email" placeholder="name@conwy.gov.uk" />
+                    <ValidationMessage For="@(() => _form.Email)" />
+                </div>
+                @if (_saveError is not null)
+                {
+                    <div class="alert alert-danger">@_saveError</div>
+                }
+                <button type="submit" class="btn btn-primary" disabled="@_saving">@(_saving ? "Adding…" : "Add")</button>
+            </EditForm>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private bool _saving;
+    private List<AdminUser> _admins = [];
+    private List<string> _configAdmins = [];
+    private AdminForm _form = new();
+    private string? _saveError;
+    private string _email = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _email = await CurrentUser.GetEmailAsync();
+        _configAdmins = [.. Configuration.GetSection("AdminEmails").Get<string[]>() ?? []];
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _admins = await Db.AdminUsers.OrderBy(a => a.Email).ToListAsync();
+        _loading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        _saveError = null;
+        var email = _form.Email.Trim();
+
+        if (_configAdmins.Contains(email, StringComparer.OrdinalIgnoreCase) ||
+            await Db.AdminUsers.AnyAsync(a => a.Email == email))
+        {
+            _saveError = $"\"{email}\" is already an admin.";
+            return;
+        }
+
+        _saving = true;
+        Db.AdminUsers.Add(new AdminUser { Email = email, CreatedBy = _email });
+        await Db.SaveChangesAsync();
+
+        _form = new AdminForm();
+        _saving = false;
+        await LoadAsync();
+    }
+
+    private async Task DeleteAsync(AdminUser a)
+    {
+        Db.AdminUsers.Remove(a);
+        await Db.SaveChangesAsync();
+        await LoadAsync();
+    }
+
+    private class AdminForm
+    {
+        [Required, EmailAddress] public string Email { get; set; } = "";
+    }
+}

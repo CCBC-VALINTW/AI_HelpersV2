@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Components.Authorization;
 
 namespace AiHelpers.Services;
 
-public class EntraCurrentUserService(AuthenticationStateProvider authStateProvider, IConfiguration configuration) : ICurrentUserService
+public class EntraCurrentUserService(AuthenticationStateProvider authStateProvider, IAdminAccessService adminAccess) : ICurrentUserService
 {
     public async Task<string> GetEmailAsync()
     {
@@ -23,8 +23,7 @@ public class EntraCurrentUserService(AuthenticationStateProvider authStateProvid
     public async Task<bool> IsAdminAsync()
     {
         var email = await GetEmailAsync();
-        var adminEmails = configuration.GetSection("AdminEmails").Get<string[]>() ?? [];
-        return adminEmails.Contains(email, StringComparer.OrdinalIgnoreCase);
+        return await adminAccess.IsAdminAsync(email);
     }
 
     public Task<ClaimsPrincipal> GetPrincipalAsync() => GetUserAsync();

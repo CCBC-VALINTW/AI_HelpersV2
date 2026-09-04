@@ -1,0 +1,337 @@
+@* Hosted as a tab inside Admin.razor, not independently routed - see that file's own comment. *@
+@using System.ComponentModel.DataAnnotations
+@using AiHelpers.Data
+@using AiHelpers.Data.Entities
+@using AiHelpers.Data.Enums
+@using Microsoft.EntityFrameworkCore
+@inject AppDbContext Db
+
+<PageTitle>Admin - LLM Definitions</PageTitle>
+
+<p class="text-muted">
+    The models a Helper can be assigned in the Helper Editor - what each one can accept, its
+    output-token ceiling, reasoning behaviour, and per-1,000-token cost used for spend tracking.
+</p>
+
+@if (_loading)
+{
+    <p><em>Loading…</em></p>
+}
+else
+{
+    <div class="card mb-4">
+        <div class="card-header">Configured models</div>
+        <div class="card-body p-0">
+            @if (_models.Count == 0)
+            {
+                <p class="text-muted p-3 mb-0">No models configured yet.</p>
+            }
+            else
+            {
+                <table class="table align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Provider</th>
+                            <th>Residency</th>
+                            <th>Accepts</th>
+                            <th>Max tokens</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var m in _models)
+                        {
+                            <tr>
+                                <td>
+                                    @m.Name
+                                    <div class="text-muted small font-monospace">@m.Identifier</div>
+                                </td>
+                                <td>@m.Provider</td>
+                                <td><span class="badge text-bg-light border">@m.Residency</span></td>
+                                <td class="small">@string.Join(", ", CapabilityLabels(m))</td>
+                                <td>@(m.MaxTokens?.ToString("N0") ?? "—")</td>
+                                <td class="text-end">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => Edit(m)">Edit</button>
+                                    <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => DeleteAsync(m)">Delete</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">@(_editingId is null ? "Add model" : $"Edit: {_form.Name}")</div>
+        <div class="card-body">
+            <EditForm Model="_form" OnValidSubmit="SaveAsync">
+                <DataAnnotationsValidator />
+
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label" for="llmName">Name</label>
+                        <InputText id="llmName" class="form-control" @bind-Value="_form.Name" />
+                        <ValidationMessage For="@(() => _form.Name)" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label" for="llmIdentifier">Provider identifier</label>
+                        <InputText id="llmIdentifier" class="form-control font-monospace" @bind-Value="_form.Identifier"
+                                   placeholder="e.g. eu.anthropic.claude-sonnet-5" />
+                        <ValidationMessage For="@(() => _form.Identifier)" />
+                    </div>
+                </div>
+
+                <div class="mb-3 mt-3">
+                    <label class="form-label" for="llmDescription">Description</label>
+                    <InputTextArea id="llmDescription" class="form-control" rows="2" @bind-Value="_form.Description" />
+                    <ValidationMessage For="@(() => _form.Description)" />
+                </div>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-md-4">
+                        <label class="form-label" for="llmProvider">Provider</label>
+                        <select id="llmProvider" class="form-select" @bind="_form.Provider">
+                            @foreach (var p in Enum.GetValues<LlmProvider>())
+                            {
+                                <option value="@p">@p</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label" for="llmResidency">Data residency</label>
+                        <select id="llmResidency" class="form-select" @bind="_form.Residency">
+                            @foreach (var r in Enum.GetValues<ModelResidency>())
+                            {
+                                <option value="@r">@r</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label" for="llmMaxTokens">Max output tokens</label>
+                        <InputNumber id="llmMaxTokens" class="form-control" @bind-Value="_form.MaxTokens" />
+                        <div class="form-text">Sent explicitly on every call - Bedrock silently defaults to 4096 if left blank.</div>
+                    </div>
+                </div>
+
+                <h6 class="mt-4">What it can accept</h6>
+                <div class="d-flex gap-4 mb-3 flex-wrap">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="llmSupportsText" @bind="_form.SupportsText" />
+                        <label class="form-check-label" for="llmSupportsText">Text</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="llmSupportsDocument" @bind="_form.SupportsDocument" />
+                        <label class="form-check-label" for="llmSupportsDocument">Documents</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="llmSupportsImage" @bind="_form.SupportsImage" />
+                        <label class="form-check-label" for="llmSupportsImage">Images</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="llmSupportsStructuredOutput" @bind="_form.SupportsStructuredOutput" />
+                        <label class="form-check-label" for="llmSupportsStructuredOutput">Structured output</label>
+                    </div>
+                </div>
+
+                <h6>Reasoning</h6>
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" id="llmSupportsReasoning" @bind="_form.SupportsReasoning" />
+                    <label class="form-check-label" for="llmSupportsReasoning">Supports reasoning / thinking</label>
+                </div>
+                @if (_form.SupportsReasoning)
+                {
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="llmAdaptive" @bind="_form.UsesAdaptiveThinking" />
+                                <label class="form-check-label" for="llmAdaptive">Uses adaptive thinking (Claude 5-family)</label>
+                            </div>
+                            <div class="form-text">
+                                Newer Anthropic models can't disable thinking, and control its depth via an
+                                effort level instead of a token budget. Leave unticked for older reasoning models.
+                            </div>
+                        </div>
+                        @if (!_form.UsesAdaptiveThinking)
+                        {
+                            <div class="col-md-6">
+                                <label class="form-label" for="llmReasoningTokens">Reasoning token budget</label>
+                                <InputNumber id="llmReasoningTokens" class="form-control" @bind-Value="_form.ReasoningTokens" />
+                            </div>
+                        }
+                    </div>
+                }
+
+                <h6>Cost (USD per 1,000 tokens)</h6>
+                <div class="row g-3 mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label" for="llmInputCost">Input token cost</label>
+                        <InputNumber id="llmInputCost" class="form-control" @bind-Value="_form.InputTokenCost" step="0.00001" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label" for="llmOutputCost">Output token cost</label>
+                        <InputNumber id="llmOutputCost" class="form-control" @bind-Value="_form.OutputTokenCost" step="0.00001" />
+                    </div>
+                </div>
+
+                @if (_saveError is not null)
+                {
+                    <div class="alert alert-danger">@_saveError</div>
+                }
+
+                <div class="d-flex gap-2">
+                    <button type="submit" class="btn btn-primary" disabled="@_saving">@(_saving ? "Saving…" : "Save")</button>
+                    @if (_editingId is not null)
+                    {
+                        <button type="button" class="btn btn-link" @onclick="ResetForm">Cancel edit</button>
+                    }
+                </div>
+            </EditForm>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private bool _saving;
+    private List<LlmDefinition> _models = [];
+    private int? _editingId;
+    private LlmDefinitionForm _form = new();
+    private string? _saveError;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _models = await Db.LlmDefinitions.OrderBy(m => m.Name).ToListAsync();
+        _loading = false;
+    }
+
+    private static List<string> CapabilityLabels(LlmDefinition m)
+    {
+        var labels = new List<string>();
+        if (m.SupportsText) labels.Add("Text");
+        if (m.SupportsDocument) labels.Add("Document");
+        if (m.SupportsImage) labels.Add("Image");
+        if (m.SupportsStructuredOutput) labels.Add("Structured output");
+        if (m.SupportsReasoning) labels.Add(m.UsesAdaptiveThinking ? "Reasoning (adaptive)" : "Reasoning");
+        return labels;
+    }
+
+    private void Edit(LlmDefinition m)
+    {
+        _editingId = m.Id;
+        _form = new LlmDefinitionForm
+        {
+            Name = m.Name,
+            Identifier = m.Identifier,
+            Description = m.Description,
+            Provider = m.Provider,
+            Residency = m.Residency,
+            MaxTokens = m.MaxTokens,
+            SupportsText = m.SupportsText,
+            SupportsDocument = m.SupportsDocument,
+            SupportsImage = m.SupportsImage,
+            SupportsStructuredOutput = m.SupportsStructuredOutput,
+            SupportsReasoning = m.SupportsReasoning,
+            ReasoningTokens = m.ReasoningTokens,
+            UsesAdaptiveThinking = m.UsesAdaptiveThinking,
+            InputTokenCost = m.InputTokenCost,
+            OutputTokenCost = m.OutputTokenCost
+        };
+        _saveError = null;
+    }
+
+    private void ResetForm()
+    {
+        _editingId = null;
+        _form = new LlmDefinitionForm();
+        _saveError = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        _saveError = null;
+        _saving = true;
+
+        if (_editingId is { } id)
+        {
+            var existing = await Db.LlmDefinitions.FirstOrDefaultAsync(m => m.Id == id);
+            if (existing is null)
+            {
+                _saveError = "This model no longer exists.";
+                _saving = false;
+                return;
+            }
+            ApplyForm(existing);
+        }
+        else
+        {
+            var model = new LlmDefinition { Identifier = "", Name = "", Description = "" };
+            ApplyForm(model);
+            Db.LlmDefinitions.Add(model);
+        }
+
+        await Db.SaveChangesAsync();
+
+        ResetForm();
+        _saving = false;
+        await LoadAsync();
+    }
+
+    // DefaultAdherence/DefaultCreativity deliberately left untouched - not shown in this form
+    // (Bedrock calls never send them, see BedrockAdapter's own comment), so touching them here
+    // would silently zero out real V1-migrated values on an existing row's next edit.
+    private void ApplyForm(LlmDefinition m)
+    {
+        m.Name = _form.Name.Trim();
+        m.Identifier = _form.Identifier.Trim();
+        m.Description = _form.Description.Trim();
+        m.Provider = _form.Provider;
+        m.Residency = _form.Residency;
+        m.MaxTokens = _form.MaxTokens;
+        m.SupportsText = _form.SupportsText;
+        m.SupportsDocument = _form.SupportsDocument;
+        m.SupportsImage = _form.SupportsImage;
+        m.SupportsStructuredOutput = _form.SupportsStructuredOutput;
+        m.SupportsReasoning = _form.SupportsReasoning;
+        m.ReasoningTokens = _form.SupportsReasoning && !_form.UsesAdaptiveThinking ? _form.ReasoningTokens : null;
+        m.UsesAdaptiveThinking = _form.SupportsReasoning && _form.UsesAdaptiveThinking;
+        m.InputTokenCost = _form.InputTokenCost;
+        m.OutputTokenCost = _form.OutputTokenCost;
+    }
+
+    private async Task DeleteAsync(LlmDefinition m)
+    {
+        var inUse = await Db.HelperDefinitions.AnyAsync(h => h.LlmDefinitionId == m.Id);
+        if (inUse)
+        {
+            _saveError = $"\"{m.Name}\" is still assigned to at least one Helper - reassign those Helpers to a different model first.";
+            return;
+        }
+
+        Db.LlmDefinitions.Remove(m);
+        await Db.SaveChangesAsync();
+        await LoadAsync();
+    }
+
+    private class LlmDefinitionForm
+    {
+        [Required] public string Name { get; set; } = "";
+        [Required] public string Identifier { get; set; } = "";
+        [Required] public string Description { get; set; } = "";
+        public LlmProvider Provider { get; set; } = LlmProvider.AwsBedrock;
+        public ModelResidency Residency { get; set; } = ModelResidency.Global;
+        public int? MaxTokens { get; set; }
+        public bool SupportsText { get; set; } = true;
+        public bool SupportsDocument { get; set; }
+        public bool SupportsImage { get; set; }
+        public bool SupportsStructuredOutput { get; set; }
+        public bool SupportsReasoning { get; set; }
+        public int? ReasoningTokens { get; set; }
+        public bool UsesAdaptiveThinking { get; set; }
+        public decimal? InputTokenCost { get; set; }
+        public decimal? OutputTokenCost { get; set; }
+    }
+}

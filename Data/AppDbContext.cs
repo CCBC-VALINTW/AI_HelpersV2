@@ -26,6 +26,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<DataConnection> DataConnections => Set<DataConnection>();
     public DbSet<HelperDataQuery> HelperDataQueries => Set<HelperDataQuery>();
     public DbSet<DataQueryExecutionLog> DataQueryExecutionLogs => Set<DataQueryExecutionLog>();
+    public DbSet<AdminUser> AdminUsers => Set<AdminUser>();
     public DbSet<Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey> DataProtectionKeys => Set<Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -55,6 +56,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<Stylesheet>(e =>
         {
             e.Property(p => p.Name).HasMaxLength(128).IsRequired();
+            e.Property(p => p.CreatedBy).HasMaxLength(256);
+            // Css/StyleInstructions deliberately left unconfigured (default nvarchar(max)) - a
+            // full <style> block can run long, same reasoning as every other free-form HTML/CSS
+            // blob in this schema (DataConnection.EncryptedConnectionString, CallbackEntry.OutputHtml).
         });
 
         modelBuilder.Entity<HelperDefinition>(e =>
@@ -281,6 +286,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .WithMany()
                 .HasForeignKey(p => p.HelperDataQueryId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<AdminUser>(e =>
+        {
+            e.Property(p => p.Email).HasMaxLength(256).IsRequired();
+            e.Property(p => p.CreatedBy).HasMaxLength(256);
+            e.HasIndex(p => p.Email).IsUnique();
         });
     }
 }

@@ -1,0 +1,221 @@
+@* Hosted as a tab inside Admin.razor, not independently routed - see that file's own comment. *@
+@using System.ComponentModel.DataAnnotations
+@using AiHelpers.Data
+@using AiHelpers.Data.Entities
+@using AiHelpers.Services
+@using Microsoft.EntityFrameworkCore
+@inject AppDbContext Db
+@inject ICurrentUserService CurrentUser
+
+<PageTitle>Admin - Stylesheets</PageTitle>
+
+<p class="text-muted">
+    CSS a Helper's output can be rendered with, selectable per-run and as a Helper's own default.
+    Every migrated stylesheet scopes its selectors under <code>.rendDoc</code> (e.g. <code>.rendDoc h1</code>,
+    <code>.rendDoc table</code>) - that's the wrapper every generated document is rendered inside,
+    so unscoped selectors here would leak into the rest of this page's own styling if it were ever
+    rendered unsandboxed. Paste a full <code>&lt;style&gt;...&lt;/style&gt;</code> block, not bare
+    CSS - an empty/placeholder stylesheet is fine (some Helpers deliberately want no extra styling).
+</p>
+
+@if (_loading)
+{
+    <p><em>Loading…</em></p>
+}
+else
+{
+    <div class="card mb-4">
+        <div class="card-header">Configured stylesheets</div>
+        <div class="card-body p-0">
+            @if (_stylesheets.Count == 0)
+            {
+                <p class="text-muted p-3 mb-0">No stylesheets configured yet.</p>
+            }
+            else
+            {
+                <table class="table align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>In use by</th>
+                            <th>Created</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var s in _stylesheets)
+                        {
+                            <tr>
+                                <td>
+                                    @s.Name
+                                    @if (!OutputDocumentBuilder.HasRealStyling(s.Css))
+                                    {
+                                        <span class="badge text-bg-light border ms-1">Placeholder / no styling</span>
+                                    }
+                                </td>
+                                <td class="small text-muted">@(s.Helpers.Count) Helper(s)</td>
+                                <td class="text-muted small">@s.CreatedAtUtc.ToLocalTime().ToString("g")<br />@s.CreatedBy</td>
+                                <td class="text-end">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => Edit(s)">Edit</button>
+                                    <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => DeleteAsync(s)">Delete</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">@(_editingId is null ? "Add stylesheet" : $"Edit: {_form.Name}")</div>
+        <div class="card-body">
+            <EditForm Model="_form" OnValidSubmit="SaveAsync">
+                <DataAnnotationsValidator />
+
+                <div class="mb-3">
+                    <label class="form-label" for="styleName">Name</label>
+                    <InputText id="styleName" class="form-control" @bind-Value="_form.Name" />
+                    <ValidationMessage For="@(() => _form.Name)" />
+                </div>
+
+                <div class="row g-3">
+                    <div class="col-lg-6">
+                        <label class="form-label" for="styleCss">CSS</label>
+                        <InputTextArea id="styleCss" class="form-control font-monospace" rows="14" style="max-width: 100%;"
+                                       @bind-Value="_form.Css"
+                                       placeholder="<style>.rendDoc h1 { color: #158ab5; } .rendDoc table { border-collapse: collapse; }</style>" />
+                        <ValidationMessage For="@(() => _form.Css)" />
+                    </div>
+                    <div class="col-lg-6">
+                        <label class="form-label">Preview</label>
+                        <iframe class="border rounded stylesheet-preview" srcdoc="@PreviewDocument" sandbox=""></iframe>
+                    </div>
+                </div>
+
+                <div class="mb-3 mt-3">
+                    <label class="form-label" for="styleNotes">Notes (optional, admin-only - not shown to users or sent to the model)</label>
+                    <InputTextArea id="styleNotes" class="form-control" rows="2" @bind-Value="_form.StyleInstructions" />
+                </div>
+
+                @if (_saveError is not null)
+                {
+                    <div class="alert alert-danger">@_saveError</div>
+                }
+
+                <div class="d-flex gap-2">
+                    <button type="submit" class="btn btn-primary" disabled="@_saving">@(_saving ? "Saving…" : "Save")</button>
+                    @if (_editingId is not null)
+                    {
+                        <button type="button" class="btn btn-link" @onclick="ResetForm">Cancel edit</button>
+                    }
+                </div>
+            </EditForm>
+        </div>
+    </div>
+}
+
+@code {
+    private const string SampleBody = """
+        <h1>Sample heading</h1>
+        <p>This is a paragraph of sample body text, so headings, paragraph spacing and links can be checked together.</p>
+        <h2>A sub-heading</h2>
+        <ul><li>First bullet point</li><li>Second bullet point</li></ul>
+        <table><thead><tr><th>Column A</th><th>Column B</th></tr></thead>
+        <tbody><tr><td>Row 1</td><td>Value</td></tr><tr><td>Row 2</td><td>Value</td></tr></tbody></table>
+        """;
+
+    private bool _loading = true;
+    private bool _saving;
+    private List<Stylesheet> _stylesheets = [];
+    private int? _editingId;
+    private StylesheetForm _form = new();
+    private string? _saveError;
+    private string _email = "";
+    private string PreviewDocument => OutputDocumentBuilder.Build(SampleBody, _form.Css);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _email = await CurrentUser.GetEmailAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        // Helpers.Count needs the nav collection loaded for the "in use by" column.
+        _stylesheets = await Db.Stylesheets.Include(s => s.Helpers).OrderBy(s => s.Name).ToListAsync();
+        _loading = false;
+    }
+
+    private void Edit(Stylesheet s)
+    {
+        _editingId = s.Id;
+        _form = new StylesheetForm { Name = s.Name, Css = s.Css, StyleInstructions = s.StyleInstructions ?? "" };
+        _saveError = null;
+    }
+
+    private void ResetForm()
+    {
+        _editingId = null;
+        _form = new StylesheetForm();
+        _saveError = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        _saveError = null;
+        _saving = true;
+
+        if (_editingId is { } id)
+        {
+            var existing = await Db.Stylesheets.FirstOrDefaultAsync(s => s.Id == id);
+            if (existing is null)
+            {
+                _saveError = "This stylesheet no longer exists.";
+                _saving = false;
+                return;
+            }
+            existing.Name = _form.Name.Trim();
+            existing.Css = _form.Css;
+            existing.StyleInstructions = string.IsNullOrWhiteSpace(_form.StyleInstructions) ? null : _form.StyleInstructions.Trim();
+        }
+        else
+        {
+            Db.Stylesheets.Add(new Stylesheet
+            {
+                Name = _form.Name.Trim(),
+                Css = _form.Css,
+                StyleInstructions = string.IsNullOrWhiteSpace(_form.StyleInstructions) ? null : _form.StyleInstructions.Trim(),
+                CreatedBy = _email
+            });
+        }
+
+        await Db.SaveChangesAsync();
+
+        ResetForm();
+        _saving = false;
+        await LoadAsync();
+    }
+
+    private async Task DeleteAsync(Stylesheet s)
+    {
+        var inUseByHelpers = await Db.HelperDefinitions.AnyAsync(h => h.DefaultStylesheetId == s.Id);
+        var inUseByDocuments = await Db.GeneratedDocuments.AnyAsync(d => d.StylesheetId == s.Id);
+        if (inUseByHelpers || inUseByDocuments)
+        {
+            _saveError = $"\"{s.Name}\" is still used as a Helper's default and/or by a saved document - those keep working if you edit it instead of deleting it.";
+            return;
+        }
+
+        Db.Stylesheets.Remove(s);
+        await Db.SaveChangesAsync();
+        await LoadAsync();
+    }
+
+    private class StylesheetForm
+    {
+        [Required] public string Name { get; set; } = "";
+        public string Css { get; set; } = "";
+        public string StyleInstructions { get; set; } = "";
+    }
+}

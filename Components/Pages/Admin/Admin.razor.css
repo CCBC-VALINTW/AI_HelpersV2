@@ -1,0 +1,37 @@
+/* Same pill-tab style as HelperEditor.razor.css's .editor-tabs/.editor-panel (including its
+   already-checked WCAG contrast values) - copied rather than shared, since Blazor CSS isolation
+   scopes a component's own stylesheet to that component's markup only. Kept as two separate
+   scoped files rather than a shared global rule so each page's tabs can diverge later without
+   touching the other. */
+.admin-tabs {
+    border-bottom: 1px solid #dee2e6;
+    padding-bottom: 0.75rem;
+    gap: 0.25rem;
+}
+
+    .admin-tabs ::deep .nav-link {
+        border: none;
+        background: none;
+        color: var(--conwy-base, #3f4851);
+        font-weight: 500;
+        font-size: 0.92rem;
+        padding: 0.4rem 1rem;
+        border-radius: 999px;
+        transition: background-color 0.1s ease, color 0.1s ease;
+    }
+
+        .admin-tabs ::deep .nav-link:hover {
+            background-color: #f1f3f5;
+        }
+
+        .admin-tabs ::deep .nav-link.active {
+            background-color: var(--conwy-ramp-2, #31597c);
+            color: #fff;
+        }
+
+.admin-panel {
+    background-color: #fff;
+    border: 1px solid #e9ecef;
+    border-radius: 0.6rem;
+    padding: 1.5rem;
+}
