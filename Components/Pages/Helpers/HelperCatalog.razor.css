@@ -1,0 +1,17 @@
+/* Bootstrap's .card has no shadow or tint by default, just a white background and a 1px
+   border - flat against the page background. A subtle resting shadow gives each card some
+   lift/separation, with a slightly deeper one plus a small rise on hover (same easing/lift as
+   Home.razor.css's .category-tile, for consistency) since these cards are themselves a click
+   target through to the Helper. The background tint is --conwy-purple (the corporate accent
+   used for --bs-primary/buttons elsewhere - see wwwroot/app.css) at very low opacity, rather
+   than a flat/named light-grey, so it reads as "branded" rather than just generically shaded. */
+.card {
+    background-color: rgba(124, 118, 183, 0.05);
+    box-shadow: 0 0.125rem 0.375rem rgba(0, 0, 0, 0.08);
+    transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.card:hover {
+    box-shadow: 0 0.375rem 0.75rem rgba(0, 0, 0, 0.12);
+    transform: translateY(-2px);
+}
