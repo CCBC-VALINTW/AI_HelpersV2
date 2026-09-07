@@ -60,6 +60,16 @@
 
     private static readonly List<ReleaseNote> Releases =
     [
+        new("1.9", new DateTime(2026, 9, 7, 12, 37, 0),
+        [
+            "Added an \"Edit this Helper\" shortcut on a Helper's run page, for anyone who's allowed to edit it - no more finding it again in the Helper Editor's own list.",
+            "Fixed a bug found on real data: Helpers connected to a Data Source with several distinct-looking columns weren't being tidied up (from the 1.8 release above) as effectively as they should have been.",
+            "Fixed an occasional error when running a Helper right after editing it, which needed a page refresh to clear."
+        ]),
+        new("1.8", new DateTime(2026, 9, 7, 11, 37, 0),
+        [
+            "Live data connected to a Helper is now automatically tidied up before it's sent to the AI, cutting out repeated information - so more data fits in before hitting a response size limit, and running Helpers with a Data Source is a little cheaper. Switchable off per Data Source if ever needed, on by default."
+        ]),
         new("1.7", new DateTime(2026, 9, 7, 11, 16, 0),
         [
             "Fixed your monthly spend allowance (shown at the top of every page) reading noticeably lower than your real spend, which also meant the spending limit wasn't being enforced as strictly as it should have been."

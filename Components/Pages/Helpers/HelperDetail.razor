@@ -1376,6 +1376,13 @@ else
     }
 
 
+    // Bounded retry counters for the two createEditor calls below - see the real, hit-in-practice
+    // race documented on that catch block. Separate per editor since they're independent JS
+    // interop calls against independent ElementReferences.
+    private const int MaxEditorInitAttempts = 3;
+    private int _inputEditorInitAttempts;
+    private int _outputEditorInitAttempts;
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         // IsContextDriven Helpers never render the "Your input" textarea at all (see the
@@ -1384,21 +1391,45 @@ else
         // against an ElementReference that was never actually rendered.
         if (_inputEditorNeedsInit && _helper is { IsExternal: false, IsContextDriven: false })
         {
-            _inputEditorNeedsInit = false;
             var module = await GetModuleAsync();
-            // Seeded from _lastInput, not always blank - on a fresh page load _lastInput is
-            // already "" so this behaves the same as before for a first run, but re-expanding the
-            // collapsed input card after a run needs to show what's actually there, not an empty
-            // editor (the underlying state would be intact either way, but the user would see an
-            // apparently-blank box for a run that already has real input behind it).
-            await module.InvokeVoidAsync("createEditor", "input", _inputRef, HtmlContentSanitizer.Sanitize(_lastInput), "Paste or type the content to process here - or attach files / add a URL below.", 220);
+            try
+            {
+                // Seeded from _lastInput, not always blank - on a fresh page load _lastInput is
+                // already "" so this behaves the same as before for a first run, but re-expanding
+                // the collapsed input card after a run needs to show what's actually there, not an
+                // empty editor (the underlying state would be intact either way, but the user
+                // would see an apparently-blank box for a run that already has real input behind it).
+                await module.InvokeVoidAsync("createEditor", "input", _inputRef, HtmlContentSanitizer.Sanitize(_lastInput), "Paste or type the content to process here - or attach files / add a URL below.", 220);
+                _inputEditorNeedsInit = false;
+            }
+            catch (JSException) when (++_inputEditorInitAttempts < MaxEditorInitAttempts)
+            {
+                // Real bug hit in practice, reported as "works fine after a refresh" - navigating
+                // here via in-app navigation (not a fresh page load) can leave _inputRef pointing
+                // at a textarea TinyMCE's own init code briefly isn't ready to bind to yet
+                // ("e.setAttribute is not a function" deep inside tinymce.min.js), which crashed
+                // the whole circuit rather than just this component - hence needing a full reload
+                // to recover. _inputEditorNeedsInit deliberately stays true (not reset above) so
+                // the next render retries this same call - by then the DOM has always caught up
+                // in practice, self-healing within the same circuit instead of losing it entirely.
+                // Bounded so a genuinely broken page doesn't retry forever.
+                StateHasChanged();
+            }
         }
 
         if (_editorNeedsInit)
         {
-            _editorNeedsInit = false;
             var module = await GetModuleAsync();
-            await module.InvokeVoidAsync("createEditor", "output", _editorRef, HtmlContentSanitizer.Sanitize(_output ?? string.Empty), null, 512);
+            try
+            {
+                await module.InvokeVoidAsync("createEditor", "output", _editorRef, HtmlContentSanitizer.Sanitize(_output ?? string.Empty), null, 512);
+                _editorNeedsInit = false;
+            }
+            catch (JSException) when (++_outputEditorInitAttempts < MaxEditorInitAttempts)
+            {
+                // Same race as the input editor above, same self-healing retry.
+                StateHasChanged();
+            }
         }
     }
 
