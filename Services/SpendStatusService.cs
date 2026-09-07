@@ -11,14 +11,19 @@ public class SpendStatusService(IDbContextFactory<AppDbContext> dbFactory) : ISp
     // own reasoning: the real exchange rate only matters at the point the actual monthly AWS
     // invoice is paid, not per-call, so a live rate here would just be spurious precision. Review
     // periodically if it drifts far from reality.
+    //
+    // Real bug fixed 2026-09-07: this used to also multiply by a second constant, CapCountingRate
+    // (also 0.8), on the theory that V1 only counted 80% of spend against a user's cap as a
+    // deliberate ~25% headroom policy. That was a misreading - V1's actual query (`WSO2 EI
+    // Bedrock Proxy API definition.txt`: `SUM(DollarCost) * 0.8` compared directly against
+    // `MonthlyCap`, a GBP-denominated field per Spend Caps' own "£" label) shows the *0.8 there
+    // was always this exact same USD-to-GBP conversion, not a separate discount - V1 never had a
+    // headroom concept at all. Applying both constants together silently double-converted
+    // currency (effectively *0.64), understating real spend by 36% and letting a user run real
+    // spend up to ~1.56x their actual cap before being blocked (this figure also gates
+    // HelperInvocationService's spend >= cap check, not just this display). CapCountingRate has
+    // been removed entirely, not just renamed - there was never a real second rule to keep.
     private const decimal UsdToGbpRate = 0.8m;
-
-    // V1 business rule: only 80% of a user's (now GBP-converted) spend counts against their cap,
-    // giving everyone a built-in ~25% headroom buffer. Coincidentally the same numeric value as
-    // UsdToGbpRate above - the two are completely unrelated (one's a currency conversion, this is
-    // a spending-policy discount) and must stay as two separate named constants, not merged into
-    // one, or a future change to either would silently change the other's behaviour too.
-    private const decimal CapCountingRate = 0.8m;
 
     public decimal CurrentSpend { get; private set; }
     public decimal CurrentCap { get; private set; } = 1.0m;
@@ -43,7 +48,7 @@ public class SpendStatusService(IDbContextFactory<AppDbContext> dbFactory) : ISp
             .Select(s => (decimal?)s.MonthlyCapAmount)
             .FirstOrDefaultAsync(cancellationToken) ?? 1.0m;
 
-        CurrentSpend = rawSpendUsd * UsdToGbpRate * CapCountingRate;
+        CurrentSpend = rawSpendUsd * UsdToGbpRate;
         CurrentCap = cap;
         Loaded = true;
 

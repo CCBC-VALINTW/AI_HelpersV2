@@ -101,10 +101,8 @@ else
 
     <p class="text-muted small mt-3 mb-0">
         "Spend this month" here is the same figure the cap is actually enforced against - real USD
-        spend converted to GBP at a fixed @((UsdToGbpRate * 100).ToString("0"))% rate, then only
-        @((CapCountingRate * 100).ToString("0"))% of that counted (everyone's built-in headroom
-        buffer) - see <code>SpendStatusService</code>. That's why it won't match the real-GBP totals
-        on the Cost Report tab.
+        spend converted to GBP at a fixed @((UsdToGbpRate * 100).ToString("0"))% rate, matching the
+        real-GBP totals on the Cost Report tab exactly - see <code>SpendStatusService</code>.
     </p>
 }
 
@@ -112,8 +110,14 @@ else
     // Duplicated from SpendStatusService deliberately, not shared via a method call into it - this
     // page exists specifically to show spend the way it's actually enforced against the cap, same
     // reasoning CostReport.razor gives for its own (different) duplicate of UsdToGbpRate alone.
+    //
+    // Real bug fixed 2026-09-07: this used to also apply a second CapCountingRate = 0.8m constant
+    // on top of UsdToGbpRate, double-converting currency (effectively *0.64) on the mistaken
+    // premise that V1 deliberately only counted 80% of spend against a cap. It didn't - V1's own
+    // query applied *0.8 exactly once, as its own USD-to-GBP conversion, before comparing against
+    // a GBP-denominated cap. See SpendStatusService.cs's own comment for the full correction and
+    // the real V1 source reference. Removed entirely here too, not just renamed.
     private const decimal UsdToGbpRate = 0.8m;
-    private const decimal CapCountingRate = 0.8m;
     private const decimal DefaultCapAmount = 1.0m;
 
     private bool _loading = true;
@@ -148,7 +152,7 @@ else
             return new Row
             {
                 UserId = userId,
-                SpendCountedGbp = rawUsd * UsdToGbpRate * CapCountingRate,
+                SpendCountedGbp = rawUsd * UsdToGbpRate,
                 CapAmount = hasCap ? capAmount : DefaultCapAmount,
                 HasExplicitCap = hasCap
             };

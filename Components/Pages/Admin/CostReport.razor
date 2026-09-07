@@ -6,9 +6,10 @@
 <PageTitle>Admin - Cost Report</PageTitle>
 
 <p class="text-muted">
-    Real AWS spend, converted to GBP at a fixed @((UsdToGbpRate * 100).ToString("0"))% rate (see
-    the note on the top status bar's own spend figure) - this is a reporting view, not a live
-    exchange-rate lookup, so treat it as indicative rather than exact to the penny.
+    Real AWS spend, converted to GBP at a fixed @((UsdToGbpRate * 100).ToString("0"))% rate - this
+    is a reporting view, not a live exchange-rate lookup, so treat it as indicative rather than
+    exact to the penny. Matches the figure shown on the top status bar and the Spend Caps tab
+    exactly - all three now compute it the same way.
 </p>
 
 <div class="mb-4" style="max-width: 16rem;">
@@ -118,10 +119,12 @@ else
 }
 
 @code {
-    // Duplicated from SpendStatusService deliberately, not shared via a method call into it -
-    // that service's own CurrentSpend also bakes in CapCountingRate (a completely unrelated
-    // spend-policy discount, see its own comment), which a general cost report must NOT apply -
-    // this figure needs to be real GBP spend, not spend-against-cap.
+    // Duplicated from SpendStatusService rather than shared via a method call into it, so this
+    // page has no dependency on that service's own per-user RefreshAsync flow - just the same
+    // currency-conversion constant. See SpendStatusService.cs's own comment for a real bug fixed
+    // here 2026-09-07: a second, mistaken CapCountingRate constant used to also apply on top of
+    // this, double-converting currency - this file never had that bug (it only ever used this one
+    // constant), which is why these totals were always the correct ones.
     private const decimal UsdToGbpRate = 0.8m;
 
     private bool _loading = true;
