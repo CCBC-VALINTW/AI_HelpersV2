@@ -15,6 +15,14 @@ public class DataQueryResult
     public bool Truncated { get; init; }
     public int DurationMs { get; init; }
     public string? ErrorMessage { get; init; }
+
+    /// <summary>Rough ~4-chars-per-token estimates (not a real tokenizer - see
+    /// DataQueryService.EstimateTokens), before vs. after DataResultCompactor's denormalised-join
+    /// collapsing. Only the "after" figure is ever actually sent to the model (that's Content) -
+    /// "before" exists purely so the Helper Editor's Test query preview can show the real saving,
+    /// query by query. Both 0 when Success is false.</summary>
+    public int EstimatedTokensBeforeCompaction { get; init; }
+    public int EstimatedTokensAfterCompaction { get; init; }
 }
 
 /// <summary>
@@ -25,7 +33,13 @@ public class DataQueryResult
 /// </summary>
 public interface IDataQueryService
 {
-    Task<DataQueryResult> ExecuteAsync(DataConnection connection, string query, int maxRows, DataQueryOutputFormat format, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// <paramref name="compactionEnabled"/> controls only which of the two already-computed
+    /// representations Content actually holds - EstimatedTokensBeforeCompaction/
+    /// AfterCompaction are always both populated regardless, so a caller previewing a query can
+    /// show the potential saving even while the toggle is off.
+    /// </summary>
+    Task<DataQueryResult> ExecuteAsync(DataConnection connection, string query, int maxRows, DataQueryOutputFormat format, bool compactionEnabled, CancellationToken cancellationToken = default);
 
     /// <summary>Connectivity-only check (a fixed trivial SELECT) for the admin page's own "Test
     /// connection" action - shares this same execution path rather than duplicating

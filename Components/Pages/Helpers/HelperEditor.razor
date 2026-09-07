@@ -386,7 +386,10 @@ else
                     <p class="text-muted small mb-2">
                         Live query results, automatically fetched and included on every run - no user interaction
                         needed, same as a Knowledge document. Requires a Data Connection to already be configured
-                        by an admin.
+                        by an admin. Results are automatically reshaped to avoid repeating the same value on every
+                        row (e.g. a customer's name repeated across all their orders) - an <code>ORDER BY</code> on
+                        the repeated column(s) helps this find the saving; "Test query" below shows the estimated
+                        token difference it made.
                     </p>
 
                     @if (_dataConnections.Count == 0)
@@ -457,6 +460,20 @@ else
                                 </div>
                             </div>
 
+                            <div class="form-check form-switch mt-2">
+                                <input class="form-check-input" type="checkbox" id="@($"compact-{index}")" checked="@ds.CompactionEnabled"
+                                       @onchange="e => ds.CompactionEnabled = (bool)e.Value!" />
+                                <label class="form-check-label small" for="@($"compact-{index}")">Optimise for token usage (recommended)</label>
+                            </div>
+                            @if (!ds.CompactionEnabled)
+                            {
+                                <div class="alert alert-warning small py-1 px-2 mt-1 mb-0">
+                                    Sends the full, unoptimised result on every run instead - this can noticeably
+                                    increase token usage and cost for this Helper, and may hit the model's response
+                                    size limit sooner on larger result sets.
+                                </div>
+                            }
+
                             <div class="mt-2 d-flex align-items-center gap-2">
                                 <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => TestDataSourceAsync(ds)"
                                         disabled="@(ds.Testing || ds.DataConnectionId is null || validationError is not null || string.IsNullOrWhiteSpace(ds.Query))">
@@ -471,9 +488,21 @@ else
                                     <span class="text-danger small">@fail.ErrorMessage</span>
                                 }
                             </div>
+                            @if (ds.TestResult is { Success: true } okResult)
+                            {
+                                <div class="text-muted small mt-1">
+                                    ~@okResult.EstimatedTokensBeforeCompaction.ToString("N0") tokens flat
+                                    → ~@okResult.EstimatedTokensAfterCompaction.ToString("N0") compacted
+                                    @if (okResult.EstimatedTokensBeforeCompaction > 0)
+                                    {
+                                        <text> (@SavingPercent(okResult) fewer@(ds.CompactionEnabled ? "" : " - if enabled"))</text>
+                                    }
+                                </div>
+                            }
                             @if (ds.TestResult is { Success: true, Content: { } previewContent })
                             {
-                                <pre class="small border rounded p-2 mt-2 mb-0" style="max-width: 100%; max-height: 10rem; overflow: auto;">@Truncate(previewContent, 2000)</pre>
+                                <pre class="small border rounded p-2 mt-2 mb-0"
+                                     style="max-width: 100%; max-height: 10rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;">@Truncate(previewContent, 2000)</pre>
                             }
                         </div>
                     }
@@ -778,6 +807,7 @@ else
         public DataQueryOutputFormat OutputFormat { get; set; } = DataQueryOutputFormat.Csv;
         public int MaxRows { get; set; } = 500;
         public string UsageInstruction { get; set; } = "";
+        public bool CompactionEnabled { get; set; } = true;
 
         // Test-only scratch state - never persisted.
         public bool Testing { get; set; }
@@ -800,12 +830,17 @@ else
         ds.TestResult = null;
         StateHasChanged();
 
-        ds.TestResult = await DataQuery.ExecuteAsync(connection, ds.Query, ds.MaxRows, ds.OutputFormat);
+        ds.TestResult = await DataQuery.ExecuteAsync(connection, ds.Query, ds.MaxRows, ds.OutputFormat, ds.CompactionEnabled);
         ds.Testing = false;
     }
 
     private static string Truncate(string text, int maxLength) =>
         text.Length <= maxLength ? text : text[..maxLength] + "…";
+
+    private static string SavingPercent(DataQueryResult result) =>
+        result.EstimatedTokensBeforeCompaction == 0
+            ? "0%"
+            : (1 - (double)result.EstimatedTokensAfterCompaction / result.EstimatedTokensBeforeCompaction).ToString("P0");
 
     private string _stylesheetId = "";
     private string _outputSchemaJson = "";
@@ -907,7 +942,8 @@ else
                 Query = q.Query,
                 OutputFormat = q.OutputFormat,
                 MaxRows = q.MaxRows,
-                UsageInstruction = q.UsageInstruction ?? ""
+                UsageInstruction = q.UsageInstruction ?? "",
+                CompactionEnabled = q.CompactionEnabled
             })
             .ToList();
 
@@ -1148,7 +1184,8 @@ else
                 Query = d.Query,
                 OutputFormat = d.OutputFormat,
                 MaxRows = d.MaxRows,
-                UsageInstruction = NullIfBlank(d.UsageInstruction)
+                UsageInstruction = NullIfBlank(d.UsageInstruction),
+                CompactionEnabled = d.CompactionEnabled
             })],
         DefaultStylesheetId = ParseIntOrNull(_stylesheetId),
         OutputSchemaJson = NullIfBlank(_outputSchemaJson),
@@ -1348,6 +1385,7 @@ else
                 existingSource.OutputFormat = draft.OutputFormat;
                 existingSource.MaxRows = draft.MaxRows;
                 existingSource.UsageInstruction = NullIfBlank(draft.UsageInstruction);
+                existingSource.CompactionEnabled = draft.CompactionEnabled;
                 existingSource.SortOrder = i;
             }
             else
@@ -1360,6 +1398,7 @@ else
                     OutputFormat = draft.OutputFormat,
                     MaxRows = draft.MaxRows,
                     UsageInstruction = NullIfBlank(draft.UsageInstruction),
+                    CompactionEnabled = draft.CompactionEnabled,
                     SortOrder = i
                 });
             }

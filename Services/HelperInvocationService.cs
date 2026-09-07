@@ -164,7 +164,7 @@ public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAd
                 return (userInput, $"This Helper's data source \"{dataQuery.Label}\" is currently disabled - contact an admin.");
             }
 
-            var result = await dataQueryService.ExecuteAsync(dataQuery.DataConnection, dataQuery.Query, dataQuery.MaxRows, dataQuery.OutputFormat, cancellationToken);
+            var result = await dataQueryService.ExecuteAsync(dataQuery.DataConnection, dataQuery.Query, dataQuery.MaxRows, dataQuery.OutputFormat, dataQuery.CompactionEnabled, cancellationToken);
             await LogDataQueryExecutionAsync(dataQuery, userEmail, result.Success, result.RowCount, result.Truncated, result.DurationMs, result.ErrorMessage, cancellationToken);
 
             if (!result.Success)

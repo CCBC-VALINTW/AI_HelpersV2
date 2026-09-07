@@ -37,5 +37,11 @@ public class HelperDataQuery
     /// pattern as HelperContextQuestion.UsageInstruction.</summary>
     public string? UsageInstruction { get; set; }
 
+    /// <summary>Whether DataResultCompactor's denormalised-join reshaping is applied before this
+    /// result is sent to the model - defaults on since it's pure reshaping (no information loss),
+    /// but left switchable per query in case a specific result genuinely needs the flat shape
+    /// preserved (e.g. a downstream prompt instruction that assumes one row per line).</summary>
+    public bool CompactionEnabled { get; set; } = true;
+
     public int SortOrder { get; set; }
 }
