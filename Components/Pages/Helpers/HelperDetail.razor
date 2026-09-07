@@ -177,6 +177,10 @@ else
             <span class="badge @(_helper.Scope == HelperScope.General ? "text-bg-primary" : "text-bg-secondary") fs-6">
                 @_helper.Scope
             </span>
+            @if (CanEdit)
+            {
+                <a href="@($"/helpers/editor/{_helper.Id}")" class="btn btn-outline-secondary btn-sm">Edit this Helper</a>
+            }
             <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="CloneAsync" disabled="@_cloning">
                 @(_cloning ? "Cloning…" : "Clone as my own")
             </button>
@@ -543,7 +547,13 @@ else
     private string _urlInput = "";
     private bool _fetchingUrl;
     private string _email = "";
+    private bool _isAdmin;
     private bool _isFavorite;
+
+    /// <summary>Same rule HelperEditor.razor itself enforces (an admin, or the Helper's own
+    /// owner) - shown here purely so the button doesn't appear for someone who'd just hit "Not
+    /// authorized" the moment they clicked it, not a separate access decision of its own.</summary>
+    private bool CanEdit => _isAdmin || _helper?.OwnerEmail == _email;
     private string _lastInput = "";
     private string _tweakInput = "";
     private bool _useRoleInfo;
@@ -615,6 +625,7 @@ else
     protected override async Task OnInitializedAsync()
     {
         _email = await CurrentUser.GetEmailAsync();
+        _isAdmin = await CurrentUser.IsAdminAsync();
 
         _helper = await Db.HelperDefinitions
             .Include(h => h.HelperCategory)
