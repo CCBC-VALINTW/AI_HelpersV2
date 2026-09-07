@@ -60,6 +60,15 @@
 
     private static readonly List<ReleaseNote> Releases =
     [
+        new("1.6", new DateTime(2026, 9, 4, 15, 36, 0),
+        [
+            "The app now automatically follows your browser or computer's light/dark mode setting - no need to change anything, it just matches your usual preference.",
+            "Admins can now set a monthly AI spending limit for individual users."
+        ]),
+        new("1.5", new DateTime(2026, 9, 4, 14, 53, 0),
+        [
+            "Added a new Admin area for authorised staff, covering who else has admin access, the AI models available to Helpers, document stylesheets, and a report of AI running costs (by user, by Helper, and over time)."
+        ]),
         new("1.4", new DateTime(2026, 9, 4, 9, 15, 0),
         [
             "Fixed an issue where longer AI-generated responses could sometimes get cut off partway through.",
