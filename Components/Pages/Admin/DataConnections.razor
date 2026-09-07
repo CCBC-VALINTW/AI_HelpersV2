@@ -283,10 +283,10 @@ else
 
     private async Task DeleteAsync(DataConnection c)
     {
-        var inUse = await Db.HelperDataQueries.AnyAsync(q => q.DataConnectionId == c.Id);
+        var inUse = await Db.DataSourceDefinitions.AnyAsync(d => d.DataConnectionId == c.Id);
         if (inUse)
         {
-            _saveError = $"\"{c.Name}\" is still used by at least one Helper's Data Source - disable it instead, or remove those Data Sources first.";
+            _saveError = $"\"{c.Name}\" is still used by at least one Data Source - disable it instead, or remove those Data Sources first.";
             return;
         }
 

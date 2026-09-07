@@ -1,0 +1,120 @@
+@* Hosted as a tab inside Admin.razor, not independently routed - see that file's own comment.
+
+   Oversight surface for DataSourceDefinition, not an authoring one - a Data Source is still
+   created/edited from within a Helper's own editor (Components/Pages/Helpers/HelperEditor.razor),
+   by whoever owns it or an admin. This exists so an admin can see everything that's been marked
+   shared (or that anyone owns) across every Helper in one place - the whole reason a Data Source
+   can even be shared is deliberately opt-in per HelperEditor.razor's own Data Sources tab, precisely
+   because some queries touch restricted data, so there needs to be a place to review and, if
+   necessary, un-share or remove one without having to track down which Helper first created it. *@
+@using AiHelpers.Data
+@using AiHelpers.Data.Entities
+@using Microsoft.EntityFrameworkCore
+@inject AppDbContext Db
+
+<PageTitle>Admin - Data Sources</PageTitle>
+
+<p class="text-muted">
+    Every Data Source defined from a Helper's own "Data Sources" tab, regardless of owner - see that
+    tab for the query/connection/format details. Shared ones are visible to every Helper editor's own
+    "use an existing Data Source" picker; un-sharing here stops new Helpers picking it up but leaves
+    it working for Helpers already attached to it. Only its Owning Helper's own editor can change one
+    in place - any other Helper that edits an attached shared Data Source gets its own copy instead,
+    so this list is the only place a Data Source with no attachments left can still be found and
+    cleaned up.
+</p>
+
+@if (_loading)
+{
+    <p><em>Loading…</em></p>
+}
+else if (_definitions.Count == 0)
+{
+    <p class="text-muted">No Data Sources have been defined yet.</p>
+}
+else
+{
+    @if (_error is not null)
+    {
+        <div class="alert alert-danger">@_error</div>
+    }
+    <table class="table align-middle">
+        <thead>
+            <tr>
+                <th>Label</th>
+                <th>Connection</th>
+                <th>Owning Helper</th>
+                <th>Author</th>
+                <th>Used by</th>
+                <th>Shared</th>
+                <th>Created</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var d in _definitions)
+            {
+                <tr>
+                    <td>@d.Label</td>
+                    <td>@d.DataConnection.Name</td>
+                    <td class="text-muted small">@(d.OwningHelper?.Name ?? "None - Helper deleted")</td>
+                    <td class="text-muted small">@d.OwnerEmail</td>
+                    <td class="text-muted small" title="@string.Join(", ", d.Attachments.Select(a => a.HelperDefinition.Name))">
+                        @(d.Attachments.Count == 0 ? "Nothing" : $"{d.Attachments.Count} Helper{(d.Attachments.Count == 1 ? "" : "s")}")
+                    </td>
+                    <td><span class="badge @(d.IsShared ? "text-bg-primary" : "text-bg-secondary")">@(d.IsShared ? "Shared" : "Not shared")</span></td>
+                    <td class="text-muted small">@d.CreatedAtUtc.ToLocalTime().ToString("g")</td>
+                    <td class="text-end">
+                        @if (d.IsShared)
+                        {
+                            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => UnshareAsync(d)">Un-share</button>
+                        }
+                        <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => DeleteAsync(d)" disabled="@(d.Attachments.Count > 0)"
+                                title="@(d.Attachments.Count > 0 ? "Still attached to at least one Helper - remove it from those Helpers first." : null)">
+                            Delete
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private List<DataSourceDefinition> _definitions = [];
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _definitions = await Db.DataSourceDefinitions
+            .Include(d => d.DataConnection)
+            .Include(d => d.OwningHelper)
+            .Include(d => d.Attachments).ThenInclude(a => a.HelperDefinition)
+            .OrderBy(d => d.Label)
+            .ToListAsync();
+        _loading = false;
+    }
+
+    private async Task UnshareAsync(DataSourceDefinition d)
+    {
+        d.IsShared = false;
+        await Db.SaveChangesAsync();
+    }
+
+    private async Task DeleteAsync(DataSourceDefinition d)
+    {
+        _error = null;
+        if (d.Attachments.Count > 0)
+        {
+            _error = $"\"{d.Label}\" is still attached to at least one Helper - remove it from those Helpers first.";
+            return;
+        }
+
+        Db.DataSourceDefinitions.Remove(d);
+        await Db.SaveChangesAsync();
+        await LoadAsync();
+    }
+}

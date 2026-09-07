@@ -389,7 +389,9 @@ else
                         by an admin. Results are automatically reshaped to avoid repeating the same value on every
                         row (e.g. a customer's name repeated across all their orders) - an <code>ORDER BY</code> on
                         the repeated column(s) helps this find the saving; "Test query" below shows the estimated
-                        token difference it made.
+                        token difference it made. A Data Source can optionally be shared, so other Helpers can
+                        attach the same one instead of it being redefined from scratch - leave sharing off for
+                        anything specific to this Helper, or that touches restricted data.
                     </p>
 
                     @if (_dataConnections.Count == 0)
@@ -401,110 +403,163 @@ else
                     {
                         var index = i;
                         var ds = _dataSources[index];
-                        var validationError = SqlQueryValidator.Validate(ds.Query);
-                        <div class="border rounded p-2 mb-2">
-                            <div class="row g-2 align-items-end">
-                                <div class="col-md-4">
-                                    <label class="form-label small mb-1">Label</label>
-                                    <input class="form-control form-control-sm" maxlength="256" value="@ds.Label"
-                                           placeholder="e.g. Current pothole reports"
-                                           @oninput="e => ds.Label = e.Value?.ToString() ?? string.Empty" />
+
+                        @if (ds.DataSourceDefinitionId is null && !ds.IsNewDefinition)
+                        {
+                            <div class="border rounded p-2 mb-2">
+                                <div class="row g-2 align-items-end">
+                                    <div class="col-md-9">
+                                        <label class="form-label small mb-1">Use an existing Data Source, or define a new one</label>
+                                        <select class="form-select form-select-sm" @onchange="e => OnDataSourceChoiceChanged(ds, e.Value?.ToString())">
+                                            <option value="">Choose…</option>
+                                            <option value="new">+ Define a new Data Source</option>
+                                            @foreach (var d in _dataSourceDefinitions)
+                                            {
+                                                <option value="@d.Id">@d.Label (@d.DataConnection.Name)@(d.OwningHelperId == Id ? "" : $" - from \"{(d.OwningHelper?.Name ?? "a Helper that no longer exists")}\"")</option>
+                                            }
+                                        </select>
+                                    </div>
+                                    <div class="col-md-3 d-flex justify-content-end">
+                                        <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => _dataSources.RemoveAt(index)" title="Remove">✕</button>
+                                    </div>
                                 </div>
-                                <div class="col-md-4">
-                                    <label class="form-label small mb-1">Connection</label>
-                                    <select class="form-select form-select-sm" @bind="ds.DataConnectionId">
-                                        <option value="">Choose…</option>
-                                        @foreach (var c in _dataConnections)
+                            </div>
+                        }
+                        else
+                        {
+                            var validationError = SqlQueryValidator.Validate(ds.Query);
+                            var isOwningHelper = ds.OwningHelperId is not null && ds.OwningHelperId == Id;
+                            <div class="border rounded p-2 mb-2">
+                                @if (!ds.IsNewDefinition)
+                                {
+                                    <p class="text-muted small mb-2">
+                                        @if (isOwningHelper)
                                         {
-                                            <option value="@c.Id">@c.Name@(c.IsEnabled ? "" : " (disabled)")</option>
+                                            <text>This Helper's own Data Source@(ds.AttachmentCount > 1 ? $" - shared with {ds.AttachmentCount - 1} other Helper(s); changes below apply to them too." : ".")</text>
                                         }
-                                    </select>
-                                </div>
-                                <div class="col-md-2">
-                                    <label class="form-label small mb-1">Format</label>
-                                    <select class="form-select form-select-sm" @bind="ds.OutputFormat">
-                                        <option value="@DataQueryOutputFormat.Csv">CSV</option>
-                                        <option value="@DataQueryOutputFormat.Json">JSON</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-2 d-flex gap-1 justify-content-end">
-                                    <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@(index == 0)"
-                                            @onclick="() => MoveDataSource(index, -1)" title="Move up">↑</button>
-                                    <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@(index == _dataSources.Count - 1)"
-                                            @onclick="() => MoveDataSource(index, 1)" title="Move down">↓</button>
-                                    <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => _dataSources.RemoveAt(index)" title="Remove">✕</button>
-                                </div>
-                            </div>
-
-                            <div class="mt-2">
-                                <label class="form-label small mb-1">Query (read-only - must start with SELECT or WITH)</label>
-                                <textarea class="form-control form-control-sm font-monospace" rows="4" value="@ds.Query"
-                                          @oninput="e => ds.Query = e.Value?.ToString() ?? string.Empty"></textarea>
-                                @if (!string.IsNullOrWhiteSpace(ds.Query) && validationError is not null)
-                                {
-                                    <div class="text-danger small mt-1">@validationError</div>
+                                        else
+                                        {
+                                            <text>Borrowed from "@(ds.OwningHelperName ?? "a Helper that no longer exists")" - changing anything below creates your own copy for this Helper, the original is unaffected.</text>
+                                        }
+                                    </p>
                                 }
-                            </div>
-
-                            <div class="row g-2 mt-1">
-                                <div class="col-md-8">
-                                    <label class="form-label small mb-1">How should the Helper use this? (optional)</label>
-                                    <input class="form-control form-control-sm" maxlength="1024" value="@ds.UsageInstruction"
-                                           placeholder="e.g. Cross-reference these against the ward names mentioned in the input"
-                                           @oninput="e => ds.UsageInstruction = e.Value?.ToString() ?? string.Empty" />
+                                <div class="row g-2 align-items-end">
+                                    <div class="col-md-4">
+                                        <label class="form-label small mb-1">Label</label>
+                                        <input class="form-control form-control-sm" maxlength="256" value="@ds.Label"
+                                               placeholder="e.g. Current pothole reports"
+                                               @oninput="e => ds.Label = e.Value?.ToString() ?? string.Empty" />
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small mb-1">Connection</label>
+                                        <select class="form-select form-select-sm" @bind="ds.DataConnectionId">
+                                            <option value="">Choose…</option>
+                                            @foreach (var c in _dataConnections)
+                                            {
+                                                <option value="@c.Id">@c.Name@(c.IsEnabled ? "" : " (disabled)")</option>
+                                            }
+                                        </select>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label small mb-1">Format</label>
+                                        <select class="form-select form-select-sm" @bind="ds.OutputFormat">
+                                            <option value="@DataQueryOutputFormat.Csv">CSV</option>
+                                            <option value="@DataQueryOutputFormat.Json">JSON</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-2 d-flex gap-1 justify-content-end">
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@(index == 0)"
+                                                @onclick="() => MoveDataSource(index, -1)" title="Move up">↑</button>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@(index == _dataSources.Count - 1)"
+                                                @onclick="() => MoveDataSource(index, 1)" title="Move down">↓</button>
+                                        <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => _dataSources.RemoveAt(index)" title="Remove">✕</button>
+                                    </div>
                                 </div>
-                                <div class="col-md-4">
-                                    <label class="form-label small mb-1">Max rows</label>
-                                    <input type="number" min="1" max="5000" class="form-control form-control-sm" value="@ds.MaxRows"
-                                           @oninput="e => ds.MaxRows = int.TryParse(e.Value?.ToString(), out var n) ? n : ds.MaxRows" />
-                                </div>
-                            </div>
 
-                            <div class="form-check form-switch mt-2">
-                                <input class="form-check-input" type="checkbox" id="@($"compact-{index}")" checked="@ds.CompactionEnabled"
-                                       @onchange="e => ds.CompactionEnabled = (bool)e.Value!" />
-                                <label class="form-check-label small" for="@($"compact-{index}")">Optimise for token usage (recommended)</label>
-                            </div>
-                            @if (!ds.CompactionEnabled)
-                            {
-                                <div class="alert alert-warning small py-1 px-2 mt-1 mb-0">
-                                    Sends the full, unoptimised result on every run instead - this can noticeably
-                                    increase token usage and cost for this Helper, and may hit the model's response
-                                    size limit sooner on larger result sets.
-                                </div>
-                            }
-
-                            <div class="mt-2 d-flex align-items-center gap-2">
-                                <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => TestDataSourceAsync(ds)"
-                                        disabled="@(ds.Testing || ds.DataConnectionId is null || validationError is not null || string.IsNullOrWhiteSpace(ds.Query))">
-                                    @(ds.Testing ? "Running…" : "Test query")
-                                </button>
-                                @if (ds.TestResult is { Success: true } ok)
-                                {
-                                    <span class="text-success small">@ok.RowCount row(s) in @ok.DurationMs ms@(ok.Truncated ? " (truncated)" : "")</span>
-                                }
-                                else if (ds.TestResult is { Success: false } fail)
-                                {
-                                    <span class="text-danger small">@fail.ErrorMessage</span>
-                                }
-                            </div>
-                            @if (ds.TestResult is { Success: true } okResult)
-                            {
-                                <div class="text-muted small mt-1">
-                                    ~@okResult.EstimatedTokensBeforeCompaction.ToString("N0") tokens flat
-                                    → ~@okResult.EstimatedTokensAfterCompaction.ToString("N0") compacted
-                                    @if (okResult.EstimatedTokensBeforeCompaction > 0)
+                                <div class="mt-2">
+                                    <label class="form-label small mb-1">Query (must start with SELECT or WITH)</label>
+                                    <textarea class="form-control form-control-sm font-monospace" rows="4" value="@ds.Query"
+                                              @oninput="e => ds.Query = e.Value?.ToString() ?? string.Empty"></textarea>
+                                    @if (!string.IsNullOrWhiteSpace(ds.Query) && validationError is not null)
                                     {
-                                        <text> (@SavingPercent(okResult) fewer@(ds.CompactionEnabled ? "" : " - if enabled"))</text>
+                                        <div class="text-danger small mt-1">@validationError</div>
                                     }
                                 </div>
-                            }
-                            @if (ds.TestResult is { Success: true, Content: { } previewContent })
-                            {
-                                <pre class="small border rounded p-2 mt-2 mb-0"
-                                     style="max-width: 100%; max-height: 10rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;">@Truncate(previewContent, 2000)</pre>
-                            }
-                        </div>
+
+                                <div class="row g-2 mt-1">
+                                    <div class="col-md-8">
+                                        <label class="form-label small mb-1">How should this Helper use this? (optional)</label>
+                                        <input class="form-control form-control-sm" maxlength="1024" value="@ds.UsageInstruction"
+                                               placeholder="e.g. Cross-reference these against the ward names mentioned in the input"
+                                               @oninput="e => ds.UsageInstruction = e.Value?.ToString() ?? string.Empty" />
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small mb-1">Max rows</label>
+                                        <input type="number" min="1" max="5000" class="form-control form-control-sm" value="@ds.MaxRows"
+                                               @oninput="e => ds.MaxRows = int.TryParse(e.Value?.ToString(), out var n) ? n : ds.MaxRows" />
+                                    </div>
+                                </div>
+
+                                <div class="form-check form-switch mt-2">
+                                    <input class="form-check-input" type="checkbox" id="@($"compact-{index}")" checked="@ds.CompactionEnabled"
+                                           @onchange="e => ds.CompactionEnabled = (bool)e.Value!" />
+                                    <label class="form-check-label small" for="@($"compact-{index}")">Optimise for token usage (recommended)</label>
+                                </div>
+                                @if (!ds.CompactionEnabled)
+                                {
+                                    <div class="alert alert-warning small py-1 px-2 mt-1 mb-0">
+                                        Sends the full, unoptimised result on every run instead - this can noticeably
+                                        increase token usage and cost for this Helper, and may hit the model's response
+                                        size limit sooner on larger result sets.
+                                    </div>
+                                }
+
+                                <div class="form-check form-switch mt-2">
+                                    <input class="form-check-input" type="checkbox" id="@($"shared-{index}")" checked="@ds.IsShared"
+                                           @onchange="e => ds.IsShared = (bool)e.Value!" />
+                                    <label class="form-check-label small" for="@($"shared-{index}")">Make this Data Source available to other Helpers</label>
+                                </div>
+                                @if (ds.IsShared)
+                                {
+                                    <div class="alert alert-warning small py-1 px-2 mt-1 mb-0">
+                                        Any Helper editor will be able to attach this Data Source, and see its query and
+                                        connection - leave this off if it's specific to this Helper, or the query touches
+                                        restricted data.
+                                    </div>
+                                }
+
+                                <div class="mt-2 d-flex align-items-center gap-2">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => TestDataSourceAsync(ds)"
+                                            disabled="@(ds.Testing || ds.DataConnectionId is null || validationError is not null || string.IsNullOrWhiteSpace(ds.Query))">
+                                        @(ds.Testing ? "Running…" : "Test query")
+                                    </button>
+                                    @if (ds.TestResult is { Success: true } ok)
+                                    {
+                                        <span class="text-success small">@ok.RowCount row(s) in @ok.DurationMs ms@(ok.Truncated ? " (truncated)" : "")</span>
+                                    }
+                                    else if (ds.TestResult is { Success: false } fail)
+                                    {
+                                        <span class="text-danger small">@fail.ErrorMessage</span>
+                                    }
+                                </div>
+                                @if (ds.TestResult is { Success: true } okResult)
+                                {
+                                    <div class="text-muted small mt-1">
+                                        ~@okResult.EstimatedTokensBeforeCompaction.ToString("N0") tokens flat
+                                        → ~@okResult.EstimatedTokensAfterCompaction.ToString("N0") compacted
+                                        @if (okResult.EstimatedTokensBeforeCompaction > 0)
+                                        {
+                                            <text> (@SavingPercent(okResult) fewer@(ds.CompactionEnabled ? "" : " - if enabled"))</text>
+                                        }
+                                    </div>
+                                }
+                                @if (ds.TestResult is { Success: true, Content: { } previewContent })
+                                {
+                                    <pre class="small border rounded p-2 mt-2 mb-0"
+                                         style="max-width: 100%; max-height: 10rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;">@Truncate(previewContent, 2000)</pre>
+                                }
+                            </div>
+                        }
                     }
 
                     <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => _dataSources.Add(new DataSourceDraft())">+ Add data source</button>
@@ -776,7 +831,7 @@ else
     /// BuildPreviewHelper's own DataQueries), regardless of whether any context question is
     /// answered.</summary>
     private bool PreviewContextDrivenNeedsAnswer => _isContextDriven
-        && !_dataSources.Any(d => !string.IsNullOrWhiteSpace(d.Label) && d.DataConnectionId is not null)
+        && !_dataSources.Any(IsValidDataSource)
         && !PreviewQuestions.Any(q => q.Type switch
     {
         ContextQuestionType.Text or ContextQuestionType.Select => !string.IsNullOrWhiteSpace(q.PreviewText),
@@ -798,20 +853,96 @@ else
     private List<DataSourceDraft> _dataSources = [];
     private List<DataConnection> _dataConnections = [];
 
+    /// <summary>Data Sources attachable to ANY Helper - i.e. every one marked IsShared, regardless
+    /// of who owns it (including this user's own - reuse across your own Helpers needs the same
+    /// explicit opt-in as sharing with anyone else). A Helper already attached to an unshared Data
+    /// Source still displays it correctly - LoadFrom populates that draft's fields directly from
+    /// the loaded attachment, never from this list.</summary>
+    private List<DataSourceDefinition> _dataSourceDefinitions = [];
+
     private class DataSourceDraft
     {
+        /// <summary>Set once this draft is a saved HelperDataQuery attachment row.</summary>
         public int? Id { get; set; }
+
+        /// <summary>The DataSourceDefinition this attaches to - null while a freshly-added row
+        /// hasn't picked "existing" or "new" yet, and stays null for one authored as new until it's
+        /// actually saved.</summary>
+        public int? DataSourceDefinitionId { get; set; }
+
+        /// <summary>True once the user has committed this still-unattached draft to authoring a
+        /// brand-new Data Source, rather than picking an existing one - just controls which half of
+        /// the picker/form below renders; has no bearing on an already-resolved draft (Id or
+        /// DataSourceDefinitionId set).</summary>
+        public bool IsNewDefinition { get; set; }
+
+        // ---- DataSourceDefinition-level fields. Always editable, regardless of who owns the
+        // attached definition or whether this Helper is the one it was designed for - see
+        // SaveAsync's own comment on why editing is never blocked, only forked when it isn't safe
+        // to apply in place.
         public int? DataConnectionId { get; set; }
         public string Label { get; set; } = "";
         public string Query { get; set; } = "";
         public DataQueryOutputFormat OutputFormat { get; set; } = DataQueryOutputFormat.Csv;
         public int MaxRows { get; set; } = 500;
-        public string UsageInstruction { get; set; } = "";
         public bool CompactionEnabled { get; set; } = true;
+
+        /// <summary>Whether this Data Source is available for other Helpers to attach - see
+        /// DataSourceDefinition.IsShared's own doc comment for why this defaults off.</summary>
+        public bool IsShared { get; set; }
+
+        /// <summary>The Helper this Data Source was originally designed for - null for a still-new,
+        /// not-yet-saved one (THIS Helper becomes its owning Helper once saved). Drives the
+        /// "borrowed from Helper X - edits here become your own copy" messaging; the real fork
+        /// decision at save time re-checks this fresh from the database, not this cached value -
+        /// see SaveAsync.</summary>
+        public int? OwningHelperId { get; set; }
+        public string? OwningHelperName { get; set; }
+
+        /// <summary>How many Helpers (including this one) are currently attached to this
+        /// DataSourceDefinition - purely informational.</summary>
+        public int AttachmentCount { get; set; }
+
+        /// <summary>Optional instruction telling the model how THIS Helper should use this result -
+        /// per-attachment, not part of the shared definition, so always editable regardless of
+        /// ownership - see HelperDataQuery.UsageInstruction's own doc comment.</summary>
+        public string UsageInstruction { get; set; } = "";
 
         // Test-only scratch state - never persisted.
         public bool Testing { get; set; }
         public DataQueryResult? TestResult { get; set; }
+    }
+
+    private static bool IsValidDataSource(DataSourceDraft d) =>
+        d.DataSourceDefinitionId is not null || (d.IsNewDefinition && !string.IsNullOrWhiteSpace(d.Label) && d.DataConnectionId is not null);
+
+    private void OnDataSourceChoiceChanged(DataSourceDraft ds, string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return;
+
+        if (value == "new")
+        {
+            ds.IsNewDefinition = true;
+            return;
+        }
+
+        if (int.TryParse(value, out var definitionId))
+        {
+            var definition = _dataSourceDefinitions.FirstOrDefault(d => d.Id == definitionId);
+            if (definition is null) return;
+
+            ds.DataSourceDefinitionId = definition.Id;
+            ds.DataConnectionId = definition.DataConnectionId;
+            ds.Label = definition.Label;
+            ds.Query = definition.Query;
+            ds.OutputFormat = definition.OutputFormat;
+            ds.MaxRows = definition.MaxRows;
+            ds.CompactionEnabled = definition.CompactionEnabled;
+            ds.IsShared = definition.IsShared;
+            ds.OwningHelperId = definition.OwningHelperId;
+            ds.OwningHelperName = definition.OwningHelper?.Name;
+            ds.AttachmentCount = definition.Attachments.Count;
+        }
     }
 
     private void MoveDataSource(int index, int delta)
@@ -863,12 +994,26 @@ else
         // All connections, not just enabled ones - a disabled connection an existing Data Source
         // still references needs to keep showing up in the picker, not vanish from under it.
         _dataConnections = await Db.DataConnections.OrderBy(c => c.Name).ToListAsync();
+        // Attachable Data Sources - only ones actually marked shared. Not shared means not shared,
+        // full stop, even for its own owner's other Helpers - real bug reported live: an unshared
+        // Data Source was still showing up in this picker for every Helper its owner could edit,
+        // since IsShared was originally OR'd with "you own it". Reusing your own work across your
+        // own Helpers now needs the same explicit opt-in as sharing it with anyone else - see
+        // DataSourceDefinition.IsShared's own doc comment.
+        _dataSourceDefinitions = await Db.DataSourceDefinitions
+            .Include(d => d.DataConnection)
+            .Include(d => d.Attachments)
+            .Include(d => d.OwningHelper)
+            .Where(d => d.IsShared)
+            .OrderBy(d => d.Label)
+            .ToListAsync();
 
         if (Id is { } id)
         {
             var existing = await Db.HelperDefinitions
                 .Include(h => h.ContextQuestions)
-                .Include(h => h.DataQueries)
+                .Include(h => h.DataQueries).ThenInclude(q => q.DataSourceDefinition).ThenInclude(d => d.Attachments)
+                .Include(h => h.DataQueries).ThenInclude(q => q.DataSourceDefinition).ThenInclude(d => d.OwningHelper)
                 .FirstOrDefaultAsync(h => h.Id == id);
             if (existing is null)
             {
@@ -937,13 +1082,18 @@ else
             .Select(q => new DataSourceDraft
             {
                 Id = q.Id,
-                DataConnectionId = q.DataConnectionId,
-                Label = q.Label,
-                Query = q.Query,
-                OutputFormat = q.OutputFormat,
-                MaxRows = q.MaxRows,
-                UsageInstruction = q.UsageInstruction ?? "",
-                CompactionEnabled = q.CompactionEnabled
+                DataSourceDefinitionId = q.DataSourceDefinitionId,
+                DataConnectionId = q.DataSourceDefinition.DataConnectionId,
+                Label = q.DataSourceDefinition.Label,
+                Query = q.DataSourceDefinition.Query,
+                OutputFormat = q.DataSourceDefinition.OutputFormat,
+                MaxRows = q.DataSourceDefinition.MaxRows,
+                CompactionEnabled = q.DataSourceDefinition.CompactionEnabled,
+                IsShared = q.DataSourceDefinition.IsShared,
+                OwningHelperId = q.DataSourceDefinition.OwningHelperId,
+                OwningHelperName = q.DataSourceDefinition.OwningHelper != null ? q.DataSourceDefinition.OwningHelper.Name : null,
+                AttachmentCount = q.DataSourceDefinition.Attachments.Count,
+                UsageInstruction = q.UsageInstruction ?? ""
             })
             .ToList();
 
@@ -1171,21 +1321,30 @@ else
         ContextQuestionsIntro = NullIfBlank(_contextQuestionsIntro),
         IsContextDriven = _isContextDriven,
         // DataConnection populated directly from the already-loaded _dataConnections list (not a
-        // DB round-trip) - ResolveDataQueriesAsync reads .DataConnection.IsEnabled straight off
-        // the object, so this preview Helper needs the real navigation filled in, not just the ID,
-        // for the preview run to genuinely exercise the same code path a real run does.
+        // DB round-trip) - ResolveDataQueriesAsync reads .DataSourceDefinition.DataConnection.
+        // IsEnabled straight off the object, so this preview Helper needs the real navigation
+        // filled in, not just the ID, for the preview run to genuinely exercise the same code path
+        // a real run does. The nested DataSourceDefinition is likewise an unsaved, in-memory
+        // object (Id 0) built straight from the draft's current fields - correct whether this draft
+        // is authoring a brand-new Data Source or has an existing one attached (either way, its
+        // Label/Query/etc. hold the current effective values - see DataSourceDraft's own doc
+        // comment on why disabled fields still track the real definition).
         DataQueries = [.. _dataSources
-            .Where(d => !string.IsNullOrWhiteSpace(d.Label) && d.DataConnectionId is not null)
+            .Where(IsValidDataSource)
             .Select(d => new HelperDataQuery
             {
-                DataConnectionId = d.DataConnectionId!.Value,
-                DataConnection = _dataConnections.First(c => c.Id == d.DataConnectionId),
-                Label = d.Label,
-                Query = d.Query,
-                OutputFormat = d.OutputFormat,
-                MaxRows = d.MaxRows,
-                UsageInstruction = NullIfBlank(d.UsageInstruction),
-                CompactionEnabled = d.CompactionEnabled
+                DataSourceDefinition = new DataSourceDefinition
+                {
+                    DataConnectionId = d.DataConnectionId!.Value,
+                    DataConnection = _dataConnections.First(c => c.Id == d.DataConnectionId),
+                    Label = d.Label,
+                    Query = d.Query,
+                    OutputFormat = d.OutputFormat,
+                    MaxRows = d.MaxRows,
+                    CompactionEnabled = d.CompactionEnabled,
+                    OwnerEmail = _email
+                },
+                UsageInstruction = NullIfBlank(d.UsageInstruction)
             })],
         DefaultStylesheetId = ParseIntOrNull(_stylesheetId),
         OutputSchemaJson = NullIfBlank(_outputSchemaJson),
@@ -1252,9 +1411,9 @@ else
         }
 
         // Same "blank draft rows are silently dropped, real ones are validated" split as context
-        // questions below - a row only counts as "real" once it has both a label and a chosen
-        // connection.
-        foreach (var ds in _dataSources.Where(d => !string.IsNullOrWhiteSpace(d.Label) && d.DataConnectionId is not null))
+        // questions below - a row only counts as "real" once it's resolved to either an existing
+        // Data Source or a fully-filled-in new one.
+        foreach (var ds in _dataSources.Where(IsValidDataSource))
         {
             var queryError = SqlQueryValidator.Validate(ds.Query);
             if (queryError is not null)
@@ -1365,10 +1524,16 @@ else
             }
         }
 
-        // Same shape as the ContextQuestions upsert above - blank/unconnected draft rows dropped
+        // Same shape as the ContextQuestions upsert above - blank/unresolved draft rows dropped
         // silently (already excluded from the pre-save validation loop above for the same reason).
-        var validDataSources = _dataSources.Where(d => !string.IsNullOrWhiteSpace(d.Label) && d.DataConnectionId is not null).ToList();
+        var validDataSources = _dataSources.Where(IsValidDataSource).ToList();
         var keepDataSourceIds = validDataSources.Where(d => d.Id.HasValue).Select(d => d.Id!.Value).ToHashSet();
+        // Captured before removal - used after the save below to garbage-collect any
+        // DataSourceDefinition this was its last attachment to (see the cleanup pass further down).
+        var staleDataSourceDefinitionIds = entity.DataQueries
+            .Where(q => !keepDataSourceIds.Contains(q.Id))
+            .Select(q => q.DataSourceDefinitionId)
+            .ToList();
         foreach (var stale in entity.DataQueries.Where(q => !keepDataSourceIds.Contains(q.Id)).ToList())
         {
             Db.HelperDataQueries.Remove(stale);
@@ -1376,31 +1541,106 @@ else
         for (var i = 0; i < validDataSources.Count; i++)
         {
             var draft = validDataSources[i];
-            if (draft.Id is { } dataSourceId)
+
+            // Editing a Data Source's mechanics is never blocked, only forked when it isn't safe to
+            // apply in place: only the Helper it was originally designed for (OwningHelperId) can
+            // modify the shared DataSourceDefinition directly - any other Helper that changes
+            // anything (including one owned by the very same person - ownership here is per-Helper,
+            // not per-person, see the class's own doc comment) gets its own copy instead, so a
+            // Helper attaching someone else's shared Data Source can never silently corrupt it out
+            // from under whichever Helper(s) actually depend on the original.
+            DataSourceDefinition? newDefinition = null;
+            if (draft.DataSourceDefinitionId is { } existingDefinitionId)
             {
-                var existingSource = entity.DataQueries.First(q => q.Id == dataSourceId);
-                existingSource.DataConnectionId = draft.DataConnectionId!.Value;
-                existingSource.Label = draft.Label.Trim();
-                existingSource.Query = draft.Query.Trim();
-                existingSource.OutputFormat = draft.OutputFormat;
-                existingSource.MaxRows = draft.MaxRows;
-                existingSource.UsageInstruction = NullIfBlank(draft.UsageInstruction);
-                existingSource.CompactionEnabled = draft.CompactionEnabled;
-                existingSource.SortOrder = i;
+                var definition = await Db.DataSourceDefinitions.FindAsync(existingDefinitionId);
+                if (definition is not null)
+                {
+                    var mechanicsChanged =
+                        definition.DataConnectionId != draft.DataConnectionId!.Value ||
+                        definition.Label != draft.Label.Trim() ||
+                        definition.Query != draft.Query.Trim() ||
+                        definition.OutputFormat != draft.OutputFormat ||
+                        definition.MaxRows != draft.MaxRows ||
+                        definition.CompactionEnabled != draft.CompactionEnabled ||
+                        definition.IsShared != draft.IsShared;
+
+                    if (definition.OwningHelperId == entity.Id)
+                    {
+                        if (mechanicsChanged)
+                        {
+                            definition.DataConnectionId = draft.DataConnectionId!.Value;
+                            definition.Label = draft.Label.Trim();
+                            definition.Query = draft.Query.Trim();
+                            definition.OutputFormat = draft.OutputFormat;
+                            definition.MaxRows = draft.MaxRows;
+                            definition.CompactionEnabled = draft.CompactionEnabled;
+                            definition.IsShared = draft.IsShared;
+                            definition.LastModifiedAtUtc = DateTime.UtcNow;
+                        }
+                    }
+                    else if (mechanicsChanged)
+                    {
+                        newDefinition = new DataSourceDefinition
+                        {
+                            DataConnectionId = draft.DataConnectionId!.Value,
+                            Label = draft.Label.Trim(),
+                            Query = draft.Query.Trim(),
+                            OutputFormat = draft.OutputFormat,
+                            MaxRows = draft.MaxRows,
+                            CompactionEnabled = draft.CompactionEnabled,
+                            OwnerEmail = _email,
+                            IsShared = draft.IsShared,
+                            OwningHelper = entity
+                        };
+                        Db.DataSourceDefinitions.Add(newDefinition);
+                    }
+                    // else: unchanged - keep pointing at the original, nothing to do.
+                }
             }
             else
             {
-                entity.DataQueries.Add(new HelperDataQuery
+                // Brand new Data Source - this Helper becomes its owning Helper regardless of
+                // _isAdmin (an admin editing someone else's Helper who authors a new Data Source
+                // here still has it owned by THIS Helper, same as HelperDefinition.OwnerEmail's own
+                // "isNew" rule assigns personal ownership to whoever's creating it).
+                newDefinition = new DataSourceDefinition
                 {
                     DataConnectionId = draft.DataConnectionId!.Value,
                     Label = draft.Label.Trim(),
                     Query = draft.Query.Trim(),
                     OutputFormat = draft.OutputFormat,
                     MaxRows = draft.MaxRows,
-                    UsageInstruction = NullIfBlank(draft.UsageInstruction),
                     CompactionEnabled = draft.CompactionEnabled,
-                    SortOrder = i
-                });
+                    OwnerEmail = _email,
+                    IsShared = draft.IsShared,
+                    OwningHelper = entity
+                };
+                Db.DataSourceDefinitions.Add(newDefinition);
+            }
+
+            if (draft.Id is { } dataSourceId)
+            {
+                var existingSource = entity.DataQueries.First(q => q.Id == dataSourceId);
+                existingSource.UsageInstruction = NullIfBlank(draft.UsageInstruction);
+                existingSource.SortOrder = i;
+                if (newDefinition is not null)
+                {
+                    // Forked mid-edit - this attachment no longer points at the original at all,
+                    // so it may now be the original's last remaining attachment; captured for the
+                    // same orphan cleanup pass the removed-rows case below already runs.
+                    staleDataSourceDefinitionIds.Add(existingSource.DataSourceDefinitionId);
+                    existingSource.DataSourceDefinition = newDefinition;
+                }
+            }
+            else if (newDefinition is not null)
+            {
+                // Navigation, not FK id - newDefinition has no Id yet (not saved until the
+                // SaveChangesAsync below), EF fixes up the FK once both are inserted together.
+                entity.DataQueries.Add(new HelperDataQuery { DataSourceDefinition = newDefinition, UsageInstruction = NullIfBlank(draft.UsageInstruction), SortOrder = i });
+            }
+            else
+            {
+                entity.DataQueries.Add(new HelperDataQuery { DataSourceDefinitionId = draft.DataSourceDefinitionId!.Value, UsageInstruction = NullIfBlank(draft.UsageInstruction), SortOrder = i });
             }
         }
 
@@ -1409,6 +1649,8 @@ else
         entity.LastModifiedAtUtc = DateTime.UtcNow;
 
         await Db.SaveChangesAsync();
+
+        await RemoveOrphanedDataSourceDefinitionsAsync(staleDataSourceDefinitionIds);
 
         // Editing an existing Helper navigates to the SAME url it's already on (Id unchanged) -
         // Blazor doesn't remount the component for a same-url navigation, so nothing else resets
@@ -1423,14 +1665,56 @@ else
     {
         if (Id is not { } id) return;
 
-        var existing = await Db.HelperDefinitions.FirstOrDefaultAsync(h => h.Id == id);
+        var existing = await Db.HelperDefinitions
+            .Include(h => h.DataQueries)
+            .FirstOrDefaultAsync(h => h.Id == id);
         if (existing is not null)
         {
+            // Captured before the delete - cascading the Helper delete removes its own
+            // HelperDataQuery attachment rows automatically, but not the DataSourceDefinitions
+            // they pointed at (they may still be shared with other Helpers) - see the cleanup
+            // pass below, same reasoning as SaveAsync's own.
+            var affectedDefinitionIds = existing.DataQueries.Select(q => q.DataSourceDefinitionId).ToList();
+
             Db.HelperDefinitions.Remove(existing);
             await Db.SaveChangesAsync();
+
+            await RemoveOrphanedDataSourceDefinitionsAsync(affectedDefinitionIds);
         }
 
         Nav.NavigateTo("/helpers/editor");
+    }
+
+    /// <summary>Deletes any of the given DataSourceDefinitions that no longer have a single
+    /// HelperDataQuery attachment anywhere, once whatever removed their last attachment has
+    /// already been committed - a private, single-use Data Source left with zero attachments is
+    /// just clutter (and, if it happened to hold restricted data, unmanaged clutter); a still-used
+    /// or still-shared one is left alone. Called after SaveChangesAsync, not before - the AnyAsync
+    /// check below queries the database directly, so the removal it's checking for must already be
+    /// committed.</summary>
+    private async Task RemoveOrphanedDataSourceDefinitionsAsync(List<int> candidateDefinitionIds)
+    {
+        if (candidateDefinitionIds.Count == 0) return;
+
+        var anyOrphaned = false;
+        foreach (var definitionId in candidateDefinitionIds.Distinct())
+        {
+            var stillUsed = await Db.HelperDataQueries.AnyAsync(a => a.DataSourceDefinitionId == definitionId);
+            if (!stillUsed)
+            {
+                var orphan = await Db.DataSourceDefinitions.FindAsync(definitionId);
+                if (orphan is not null)
+                {
+                    Db.DataSourceDefinitions.Remove(orphan);
+                    anyOrphaned = true;
+                }
+            }
+        }
+
+        if (anyOrphaned)
+        {
+            await Db.SaveChangesAsync();
+        }
     }
 
     private static string? NullIfBlank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();

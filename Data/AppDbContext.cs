@@ -24,6 +24,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<GeneratedDocument> GeneratedDocuments => Set<GeneratedDocument>();
     public DbSet<AccessLogEntry> AccessLogEntries => Set<AccessLogEntry>();
     public DbSet<DataConnection> DataConnections => Set<DataConnection>();
+    public DbSet<DataSourceDefinition> DataSourceDefinitions => Set<DataSourceDefinition>();
     public DbSet<HelperDataQuery> HelperDataQueries => Set<HelperDataQuery>();
     public DbSet<DataQueryExecutionLog> DataQueryExecutionLogs => Set<DataQueryExecutionLog>();
     public DbSet<AdminUser> AdminUsers => Set<AdminUser>();
@@ -251,27 +252,51 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(p => p.LastTestMessage).HasMaxLength(2048);
         });
 
-        modelBuilder.Entity<HelperDataQuery>(e =>
+        modelBuilder.Entity<DataSourceDefinition>(e =>
         {
             e.Property(p => p.Label).HasMaxLength(256).IsRequired();
             e.Property(p => p.OutputFormat).HasConversion<string>().HasMaxLength(10);
+            e.Property(p => p.OwnerEmail).HasMaxLength(256).IsRequired();
+
+            // Restrict, not SetNull/Cascade - DataConnectionId isn't nullable (a query with no
+            // connection is meaningless), and silently cascading the delete would destroy a Data
+            // Source's config as a side effect of someone tidying up connections. Forces the real
+            // intended path instead: disable the connection (DataConnection.IsEnabled), don't
+            // delete it while anything still references it.
+            e.HasOne(p => p.DataConnection)
+                .WithMany(c => c.DataSources)
+                .HasForeignKey(p => p.DataConnectionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // SetNull, not Restrict/Cascade - deleting the owning Helper must not be blocked just
+            // because a Data Source it created is still shared with other Helpers, and must not
+            // take that Data Source down with it either. A null OwningHelperId just means nobody
+            // can edit it in place any more (see the property's own doc comment) - a safe fallback,
+            // not a broken state.
+            e.HasOne(p => p.OwningHelper)
+                .WithMany()
+                .HasForeignKey(p => p.OwningHelperId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<HelperDataQuery>(e =>
+        {
             e.Property(p => p.UsageInstruction).HasMaxLength(1024);
 
-            // Queries belong to their Helper and have no independent meaning - cascade, same as
-            // HelperContextQuestion.
+            // Attachments belong to their Helper and have no independent meaning - cascade, same
+            // as HelperContextQuestion. The DataSourceDefinition they point at is NOT deleted by
+            // this - it may still be attached to (or shared with) other Helpers.
             e.HasOne(p => p.HelperDefinition)
                 .WithMany(h => h.DataQueries)
                 .HasForeignKey(p => p.HelperDefinitionId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // Restrict, not SetNull/Cascade - DataConnectionId isn't nullable (a query with no
-            // connection is meaningless), and silently cascading the delete would destroy a
-            // Helper's query config as a side effect of someone tidying up connections. Forces the
-            // real intended path instead: disable the connection (DataConnection.IsEnabled),
-            // don't delete it while anything still references it.
-            e.HasOne(p => p.DataConnection)
-                .WithMany(c => c.DataQueries)
-                .HasForeignKey(p => p.DataConnectionId)
+            // Restrict - a shared DataSourceDefinition can have several attachments; the app layer
+            // (HelperEditor.razor's SaveAsync) is responsible for deleting a definition once its
+            // last attachment is removed, not an implicit cascade here.
+            e.HasOne(p => p.DataSourceDefinition)
+                .WithMany(d => d.Attachments)
+                .HasForeignKey(p => p.DataSourceDefinitionId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

@@ -1,14 +1,16 @@
-using AiHelpers.Data.Enums;
-
 namespace AiHelpers.Data.Entities;
 
 /// <summary>
-/// A Helper-specific, admin/owner-authored query against a DataConnection - executed
-/// automatically on every run, same "silently included, no user interaction needed" shape as
-/// HelperDefinition.HasKnowledge, not a user-facing context question. Deliberately not
-/// parameterised from context-question answers (a real future extension, not this pass) - that's
-/// exactly where untrusted input would start touching a query, and it deserves its own careful
-/// design rather than being folded in implicitly here.
+/// Attaches one DataSourceDefinition to one Helper - the thin per-Helper join row left behind once
+/// the actual query/connection/format/etc. were split out into DataSourceDefinition (2026-09-07,
+/// to let a Data Source be reused across Helpers - see that class's own doc comment). Everything
+/// here is genuinely per-attachment, not part of the shared definition: which Helper, where in its
+/// list (SortOrder), and how THIS Helper specifically should use the result (UsageInstruction) -
+/// two Helpers attaching the same shared Data Source can reasonably want different guidance text
+/// for how to use the same underlying data.
+///
+/// Run automatically on every call, no user interaction needed - see DataSourceDefinition's own
+/// doc comment for why this isn't a context-question type.
 /// </summary>
 public class HelperDataQuery
 {
@@ -17,31 +19,14 @@ public class HelperDataQuery
     public int HelperDefinitionId { get; set; }
     public HelperDefinition HelperDefinition { get; set; } = null!;
 
-    public int DataConnectionId { get; set; }
-    public DataConnection DataConnection { get; set; } = null!;
+    public int DataSourceDefinitionId { get; set; }
+    public DataSourceDefinition DataSourceDefinition { get; set; } = null!;
 
-    /// <summary>Shown to the model as a heading above the query's result - e.g. "Current pothole
-    /// reports".</summary>
-    public required string Label { get; set; }
-
-    public required string Query { get; set; }
-
-    public DataQueryOutputFormat OutputFormat { get; set; } = DataQueryOutputFormat.Csv;
-
-    /// <summary>Hard cap on rows read back - protects against an unbounded result set blowing out
-    /// the request (and the model's context) the same way MaxDocumentBytes/MaxAttachments already
-    /// guard uploads. Truncated results say so explicitly in the folded-in text, never silently.</summary>
-    public int MaxRows { get; set; } = 500;
-
-    /// <summary>Optional instruction telling the model how to use this specific result, same
-    /// pattern as HelperContextQuestion.UsageInstruction.</summary>
+    /// <summary>Optional instruction telling the model how THIS Helper should use this specific
+    /// result, same pattern as HelperContextQuestion.UsageInstruction. Deliberately not part of
+    /// DataSourceDefinition - a shared Data Source can reasonably need different framing for each
+    /// Helper that attaches it.</summary>
     public string? UsageInstruction { get; set; }
-
-    /// <summary>Whether DataResultCompactor's denormalised-join reshaping is applied before this
-    /// result is sent to the model - defaults on since it's pure reshaping (no information loss),
-    /// but left switchable per query in case a specific result genuinely needs the flat shape
-    /// preserved (e.g. a downstream prompt instruction that assumes one row per line).</summary>
-    public bool CompactionEnabled { get; set; } = true;
 
     public int SortOrder { get; set; }
 }

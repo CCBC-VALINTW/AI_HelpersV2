@@ -60,6 +60,12 @@
 
     private static readonly List<ReleaseNote> Releases =
     [
+        new("1.11", new DateTime(2026, 9, 7, 15, 35, 0),
+        [
+            "A Data Source can now optionally be shared, so other Helpers can attach the same live data feed instead of it being set up again from scratch - off by default, so anything Helper-specific or holding restricted data stays private unless you choose to share it.",
+            "A shared Data Source can only be edited directly by the Helper it was originally built for - any other Helper that changes it gets its own independent copy instead, so borrowing one can never affect the original or any other Helper relying on it.",
+            "Admins can review every Data Source that's been defined, which Helper originally owns it, and which Helpers currently use it, under Admin → Data Sources."
+        ]),
         new("1.10", new DateTime(2026, 9, 7, 13, 25, 0),
         [
             "Fixed an issue where a Helper's output could occasionally fail to appear in Recent Runs if you navigated to another page before it finished generating.",

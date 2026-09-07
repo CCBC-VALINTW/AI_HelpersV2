@@ -3,8 +3,8 @@ using AiHelpers.Data.Enums;
 namespace AiHelpers.Data.Entities;
 
 /// <summary>
-/// An admin-defined connection to an external data source, selectable by any Helper editor when
-/// attaching a HelperDataQuery - same ownership shape as LlmDefinition (admin-created, globally
+/// An admin-defined connection to an external data source, selectable when creating a
+/// DataSourceDefinition - same ownership shape as LlmDefinition (admin-created, globally
 /// selectable, no per-user ACL of its own). The real access-control lever is what database
 /// account the connection string authenticates as - see EncryptedConnectionString's own doc
 /// comment.
@@ -28,9 +28,9 @@ public class DataConnection
     public required string EncryptedConnectionString { get; set; }
 
     /// <summary>Lets a connection be taken out of service (credential rotated, system
-    /// decommissioned) without deleting it and orphaning every HelperDataQuery that references
-    /// it. A Helper run against a disabled connection fails loudly with a specific message rather
-    /// than silently skipping the data source.</summary>
+    /// decommissioned) without deleting it and orphaning every DataSourceDefinition that
+    /// references it. A Helper run against a disabled connection fails loudly with a specific
+    /// message rather than silently skipping the data source.</summary>
     public bool IsEnabled { get; set; } = true;
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
@@ -43,5 +43,5 @@ public class DataConnection
     public bool? LastTestSucceeded { get; set; }
     public string? LastTestMessage { get; set; }
 
-    public ICollection<HelperDataQuery> DataQueries { get; set; } = [];
+    public ICollection<DataSourceDefinition> DataSources { get; set; } = [];
 }

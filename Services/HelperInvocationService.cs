@@ -181,24 +181,25 @@ public class HelperInvocationService(IDbContextFactory<AppDbContext> dbFactory, 
         var blocks = new List<string>();
         foreach (var dataQuery in helper.DataQueries.OrderBy(q => q.SortOrder))
         {
-            if (!dataQuery.DataConnection.IsEnabled)
+            var definition = dataQuery.DataSourceDefinition;
+            if (!definition.DataConnection.IsEnabled)
             {
                 await LogDataQueryExecutionAsync(db, dataQuery, userEmail, success: false, rowCount: null, truncated: false, durationMs: 0,
                     errorMessage: "Connection is disabled.", cancellationToken);
-                return (userInput, $"This Helper's data source \"{dataQuery.Label}\" is currently disabled - contact an admin.");
+                return (userInput, $"This Helper's data source \"{definition.Label}\" is currently disabled - contact an admin.");
             }
 
-            var result = await dataQueryService.ExecuteAsync(dataQuery.DataConnection, dataQuery.Query, dataQuery.MaxRows, dataQuery.OutputFormat, dataQuery.CompactionEnabled, cancellationToken);
+            var result = await dataQueryService.ExecuteAsync(definition.DataConnection, definition.Query, definition.MaxRows, definition.OutputFormat, definition.CompactionEnabled, cancellationToken);
             await LogDataQueryExecutionAsync(db, dataQuery, userEmail, result.Success, result.RowCount, result.Truncated, result.DurationMs, result.ErrorMessage, cancellationToken);
 
             if (!result.Success)
             {
-                return (userInput, $"This Helper's data source \"{dataQuery.Label}\" failed: {result.ErrorMessage}");
+                return (userInput, $"This Helper's data source \"{definition.Label}\" failed: {result.ErrorMessage}");
             }
 
             var heading = string.IsNullOrWhiteSpace(dataQuery.UsageInstruction)
-                ? dataQuery.Label
-                : $"{dataQuery.Label} ({dataQuery.UsageInstruction})";
+                ? definition.Label
+                : $"{definition.Label} ({dataQuery.UsageInstruction})";
             blocks.Add($"## {heading}\n{result.Content}");
         }
 
@@ -223,7 +224,7 @@ public class HelperInvocationService(IDbContextFactory<AppDbContext> dbFactory, 
             // "loose", same as how AccountingEntry already logs a preview run's real spend
             // without needing to reference a persisted GeneratedDocument.
             HelperDataQueryId = dataQuery.Id == 0 ? null : dataQuery.Id,
-            Label = dataQuery.Label,
+            Label = dataQuery.DataSourceDefinition.Label,
             UserId = userEmail,
             Succeeded = success,
             RowCount = rowCount,

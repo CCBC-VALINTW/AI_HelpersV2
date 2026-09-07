@@ -4,6 +4,7 @@ using AiHelpers.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace AiHelpers.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260907135940_AddSharedDataSourceDefinitions")]
+    partial class AddSharedDataSourceDefinitions
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -335,9 +338,6 @@ namespace AiHelpers.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
-                    b.Property<int?>("OwningHelperId")
-                        .HasColumnType("int");
-
                     b.Property<string>("Query")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -345,8 +345,6 @@ namespace AiHelpers.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("DataConnectionId");
-
-                    b.HasIndex("OwningHelperId");
 
                     b.ToTable("DataSourceDefinitions");
                 });
@@ -996,14 +994,7 @@ namespace AiHelpers.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("AiHelpers.Data.Entities.HelperDefinition", "OwningHelper")
-                        .WithMany()
-                        .HasForeignKey("OwningHelperId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.Navigation("DataConnection");
-
-                    b.Navigation("OwningHelper");
                 });
 
             modelBuilder.Entity("AiHelpers.Data.Entities.Feedback", b =>

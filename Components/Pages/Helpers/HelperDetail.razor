@@ -126,7 +126,7 @@ else
         @foreach (var dq in _helper!.DataQueries.OrderBy(q => q.SortOrder))
         {
             <span class="badge text-bg-info" title="@(dq.UsageInstruction ?? "Live data, automatically included with every run")">
-                Data Feed: @dq.Label
+                Data Feed: @dq.DataSourceDefinition.Label
             </span>
         }
     </div>;
@@ -632,7 +632,7 @@ else
             .Include(h => h.HelperCategory)
             .Include(h => h.LlmDefinition)
             .Include(h => h.ContextQuestions)
-            .Include(h => h.DataQueries).ThenInclude(q => q.DataConnection)
+            .Include(h => h.DataQueries).ThenInclude(q => q.DataSourceDefinition).ThenInclude(d => d.DataConnection)
             .Where(h => h.Id == Id && (h.Scope == HelperScope.General || h.OwnerEmail == _email))
             .FirstOrDefaultAsync();
 
@@ -757,16 +757,13 @@ else
                 OptionsJson = q.OptionsJson,
                 SortOrder = q.SortOrder
             })],
-            // References the same DataConnection rows, same as LlmDefinitionId above - Data
-            // Connections are shared admin-managed resources, not per-Helper, so there's nothing
-            // to actually clone here.
+            // References the same DataSourceDefinition rows, same as LlmDefinitionId above - a
+            // Data Source's query/connection/etc. are a reusable resource independent of any one
+            // Helper (see DataSourceDefinition's own doc comment), so there's nothing to actually
+            // clone here, only the per-Helper attachment (UsageInstruction/SortOrder).
             DataQueries = [.. _helper.DataQueries.OrderBy(q => q.SortOrder).Select(q => new Data.Entities.HelperDataQuery
             {
-                DataConnectionId = q.DataConnectionId,
-                Label = q.Label,
-                Query = q.Query,
-                OutputFormat = q.OutputFormat,
-                MaxRows = q.MaxRows,
+                DataSourceDefinitionId = q.DataSourceDefinitionId,
                 UsageInstruction = q.UsageInstruction,
                 SortOrder = q.SortOrder
             })]

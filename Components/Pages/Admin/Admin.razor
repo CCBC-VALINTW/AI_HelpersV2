@@ -15,6 +15,9 @@
         <button type="button" class="nav-link @(_activeTab == AdminTab.DataConnections ? "active" : "")" @onclick="() => _activeTab = AdminTab.DataConnections">Data Connections</button>
     </li>
     <li class="nav-item">
+        <button type="button" class="nav-link @(_activeTab == AdminTab.DataSources ? "active" : "")" @onclick="() => _activeTab = AdminTab.DataSources">Data Sources</button>
+    </li>
+    <li class="nav-item">
         <button type="button" class="nav-link @(_activeTab == AdminTab.Admins ? "active" : "")" @onclick="() => _activeTab = AdminTab.Admins">Admins</button>
     </li>
     <li class="nav-item">
@@ -45,6 +48,10 @@
     {
         <DataConnections />
     }
+    else if (_activeTab == AdminTab.DataSources)
+    {
+        <DataSources />
+    }
     else if (_activeTab == AdminTab.Admins)
     {
         <AdminUsers />
@@ -70,6 +77,6 @@
 @code {
     // No URL/query-string reflection of the active tab - matches HelperEditor.razor's own
     // EditorTab precedent exactly (client-side field only, no deep-linking to a specific tab).
-    private enum AdminTab { Credentials, DataConnections, Admins, LlmDefinitions, Stylesheets, CostReport, SpendCaps }
+    private enum AdminTab { Credentials, DataConnections, DataSources, Admins, LlmDefinitions, Stylesheets, CostReport, SpendCaps }
     private AdminTab _activeTab = AdminTab.Credentials;
 }
