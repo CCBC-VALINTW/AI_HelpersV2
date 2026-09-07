@@ -12,8 +12,24 @@ namespace AiHelpers.Services;
 /// Ports V1's WSO2 proxy business logic (spend check -> call model -> log cost) as plain C#
 /// against the app's own database, instead of SQL-mediated async polling - see
 /// project_ai_helpers_v1_architecture memory for the original flow this replaces.
+///
+/// Real bug fixed 2026-09-07: a real Helper call can run for many minutes (long documents have
+/// taken 20+), and this used to share the plain injected, circuit-scoped AppDbContext other
+/// components/pages also use for the lifetime of the whole browser tab. Navigating to any other
+/// page mid-run - not closing the tab, just clicking a link - meant that page's own
+/// OnInitializedAsync raced this method's own SaveChangesAsync calls (AccountingEntry,
+/// CallbackEntry, DataQueryExecutionLog) on the SAME DbContext instance, which EF Core does not
+/// support concurrently. Whichever save lost the race threw "A second operation was started on
+/// this context instance before a previous operation completed" - and since
+/// LogCallbackEntryAsync/LogDataQueryExecutionAsync both deliberately swallow their own
+/// SaveChangesAsync failures (by design, so a logging failure never breaks an otherwise-successful
+/// run), this failed completely silently: no error, but the CallbackEntry a user would later look
+/// for in Recent Runs was simply never written. Same root cause SpendStatusService already hit
+/// and fixed once before. Fixed the same way: RunAsync now creates its own independent,
+/// short-lived DbContext via IDbContextFactory instead of sharing the injected one, so it no
+/// longer contends with whatever page the user has since navigated to.
 /// </summary>
-public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAdapter> adapters, ISpendStatusService spendStatus, IDataQueryService dataQueryService) : IHelperInvocationService
+public class HelperInvocationService(IDbContextFactory<AppDbContext> dbFactory, IEnumerable<ILlmProviderAdapter> adapters, ISpendStatusService spendStatus, IDataQueryService dataQueryService) : IHelperInvocationService
 {
     public async Task<HelperInvocationOutcome> RunAsync(HelperDefinition helper, string userInput, string userEmail, IReadOnlyList<Attachment>? attachments = null, CancellationToken cancellationToken = default)
     {
@@ -39,7 +55,13 @@ public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAd
             return new HelperInvocationOutcome { ErrorMessage = $"No adapter available yet for {helper.LlmDefinition.Provider}." };
         }
 
-        var (effectiveInput, dataQueryError) = await ResolveDataQueriesAsync(helper, userInput, userEmail, cancellationToken);
+        // Own independent context for this run, not the injected circuit-scoped one - see the
+        // class doc comment for why. Held for the whole run (not re-acquired per save) so this
+        // stays one consistent unit of work, same as the shared context used to be, just no
+        // longer contending with whatever else the circuit gets up to while this is in flight.
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+
+        var (effectiveInput, dataQueryError) = await ResolveDataQueriesAsync(db, helper, userInput, userEmail, cancellationToken);
         if (dataQueryError is not null)
         {
             return new HelperInvocationOutcome { ErrorMessage = dataQueryError, Spend = spend, Cap = cap };
@@ -84,7 +106,9 @@ public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAd
         // Recompute rather than reuse the pre-call (spend, cap) - this run's own cost has just
         // been logged, so the pre-call figures would under-report by exactly this call's cost.
         // Also pushes the update out via SpendStatusService.Changed so the top status bar reflects
-        // it immediately, not just whatever this method returns to its caller.
+        // it immediately, not just whatever this method returns to its caller. SpendStatusService
+        // already uses its own IDbContextFactory-sourced context internally, so this call was
+        // never part of the concurrency risk this fix addresses.
         var (updatedSpend, updatedCap) = await spendStatus.RefreshAsync(userEmail, cancellationToken);
 
         var (content, suggestedDescription) = ExtractContent(result.Text);
@@ -92,7 +116,7 @@ public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAd
             string.IsNullOrWhiteSpace(suggestedDescription) ? helper.Name : $"{helper.Name} - {suggestedDescription}",
             fallback: helper.Name);
 
-        await LogCallbackEntryAsync(helper, userEmail, content, suggestedFileName, result, cancellationToken);
+        await LogCallbackEntryAsync(db, helper, userEmail, content, suggestedFileName, result, cancellationToken);
 
         var response = new HelperResponse
         {
@@ -150,7 +174,7 @@ public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAd
     /// of outcome, both for debugging ("why did this look wrong") and as part of this feature's
     /// own security auditability story.
     /// </summary>
-    private async Task<(string EffectiveInput, string? Error)> ResolveDataQueriesAsync(HelperDefinition helper, string userInput, string userEmail, CancellationToken cancellationToken)
+    private async Task<(string EffectiveInput, string? Error)> ResolveDataQueriesAsync(AppDbContext db, HelperDefinition helper, string userInput, string userEmail, CancellationToken cancellationToken)
     {
         if (helper.DataQueries.Count == 0) return (userInput, null);
 
@@ -159,13 +183,13 @@ public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAd
         {
             if (!dataQuery.DataConnection.IsEnabled)
             {
-                await LogDataQueryExecutionAsync(dataQuery, userEmail, success: false, rowCount: null, truncated: false, durationMs: 0,
+                await LogDataQueryExecutionAsync(db, dataQuery, userEmail, success: false, rowCount: null, truncated: false, durationMs: 0,
                     errorMessage: "Connection is disabled.", cancellationToken);
                 return (userInput, $"This Helper's data source \"{dataQuery.Label}\" is currently disabled - contact an admin.");
             }
 
             var result = await dataQueryService.ExecuteAsync(dataQuery.DataConnection, dataQuery.Query, dataQuery.MaxRows, dataQuery.OutputFormat, dataQuery.CompactionEnabled, cancellationToken);
-            await LogDataQueryExecutionAsync(dataQuery, userEmail, result.Success, result.RowCount, result.Truncated, result.DurationMs, result.ErrorMessage, cancellationToken);
+            await LogDataQueryExecutionAsync(db, dataQuery, userEmail, result.Success, result.RowCount, result.Truncated, result.DurationMs, result.ErrorMessage, cancellationToken);
 
             if (!result.Success)
             {
@@ -183,7 +207,7 @@ public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAd
         return ($"{dataBlock}\n\n{userInput}", null);
     }
 
-    private async Task LogDataQueryExecutionAsync(HelperDataQuery dataQuery, string userEmail, bool success, int? rowCount, bool truncated, int durationMs, string? errorMessage, CancellationToken cancellationToken)
+    private async Task LogDataQueryExecutionAsync(AppDbContext db, HelperDataQuery dataQuery, string userEmail, bool success, int? rowCount, bool truncated, int durationMs, string? errorMessage, CancellationToken cancellationToken)
     {
         // Never let a logging failure break (or crash - see the real incident this comment
         // replaced) the run itself - same "silent by design" reasoning as AccessLogService.LogAsync.
@@ -217,12 +241,12 @@ public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAd
         }
         catch
         {
-            // Detach, not just swallow - db is a scoped-per-circuit AppDbContext in this Blazor
-            // Server app (long-lived for the whole user session, not per-request), so a failed
-            // entity left in the change tracker would keep getting re-submitted - and keep
-            // failing - on every later SaveChangesAsync call for the rest of that circuit's life,
-            // breaking completely unrelated saves too. Detaching removes it from tracking
-            // entirely, so this failure stays contained to this one log entry.
+            // Detach, not just swallow - even though db here is now this run's own short-lived
+            // context (see the class doc comment), a failed entity left in the change tracker
+            // would still poison every later SaveChangesAsync call made against this SAME context
+            // for the rest of this run (the accounting write, the CallbackEntry write below).
+            // Detaching removes it from tracking entirely, so this failure stays contained to
+            // this one log entry.
             db.Entry(logEntry).State = EntityState.Detached;
         }
     }
@@ -237,7 +261,7 @@ public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAd
     /// regardless of whether the caller goes on to persist it as a real GeneratedDocument. See
     /// CallbackEntry's own doc comment for the full "why".
     /// </summary>
-    private async Task LogCallbackEntryAsync(HelperDefinition helper, string userEmail, string content, string suggestedFileName, LlmInvocationResult result, CancellationToken cancellationToken)
+    private async Task LogCallbackEntryAsync(AppDbContext db, HelperDefinition helper, string userEmail, string content, string suggestedFileName, LlmInvocationResult result, CancellationToken cancellationToken)
     {
         var entry = new CallbackEntry
         {
@@ -266,8 +290,8 @@ public class HelperInvocationService(AppDbContext db, IEnumerable<ILlmProviderAd
         catch
         {
             // Never let this break the run itself - see LogDataQueryExecutionAsync's own doc
-            // comment for why detaching (not just swallowing) matters for this app's
-            // scoped-per-circuit AppDbContext specifically.
+            // comment for why detaching (not just swallowing) still matters even against this
+            // run's own private context.
             db.Entry(entry).State = EntityState.Detached;
         }
     }

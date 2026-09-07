@@ -60,6 +60,11 @@
 
     private static readonly List<ReleaseNote> Releases =
     [
+        new("1.10", new DateTime(2026, 9, 7, 13, 25, 0),
+        [
+            "Fixed an issue where a Helper's output could occasionally fail to appear in Recent Runs if you navigated to another page before it finished generating.",
+            "Fixed a related error that could occasionally end your whole session (every open tab) if you navigated away from a running Helper before it finished."
+        ]),
         new("1.9", new DateTime(2026, 9, 7, 12, 37, 0),
         [
             "Added an \"Edit this Helper\" shortcut on a Helper's run page, for anyone who's allowed to edit it - no more finding it again in the Helper Editor's own list.",

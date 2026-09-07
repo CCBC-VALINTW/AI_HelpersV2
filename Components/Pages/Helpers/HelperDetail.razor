@@ -489,6 +489,7 @@ else
     private ElementReference _editorRef;
     private IJSObjectReference? _module;
     private IJSObjectReference? _actionsModule;
+    private bool _disposed;
     private List<Attachment> _attachments = [];
     private List<ContextAnswerState> _contextAnswers = [];
 
@@ -958,6 +959,19 @@ else
                 .Concat(_contextAnswers.Where(a => a.Document is not null).Select(a => a.Document!))
                 .ToList();
             var outcome = await InvocationService.RunAsync(_helper, effectiveInput, email, effectiveAttachments);
+
+            // Real bug hit live: a run can easily outlast a user navigating to another page (a
+            // long document can take minutes), and Blazor disposes this component - including
+            // _module, see DisposeAsync below - the moment that happens. This continuation keeps
+            // running regardless (nothing cancels RunAsync just because the page went away, by
+            // design - see HelperInvocationService's own doc comment on why that's deliberate),
+            // so without this check it would go on to call the now-disposed _module below
+            // (destroyEditor) and throw ObjectDisposedException unhandled, crashing the entire
+            // circuit - every tab on this session, not just this page. Nothing is lost by bailing
+            // out here: RunAsync already persisted everything that needs to survive this (spend,
+            // the CallbackEntry for Recent Runs) via its own independent DbContext before
+            // returning, and there's no UI left to update.
+            if (_disposed) return;
 
             _budgetExceeded = outcome.BudgetExceeded;
             _spend = outcome.Spend;
@@ -1470,6 +1484,11 @@ else
 
     public async ValueTask DisposeAsync()
     {
+        // Set first, before any await below - ExecuteAsync's own continuation (see its check of
+        // this same flag) can only safely tell "has this component already been torn down" if
+        // this is true by the time it resumes, not after.
+        _disposed = true;
+
         if (_module is not null)
         {
             try
