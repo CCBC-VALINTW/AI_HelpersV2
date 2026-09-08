@@ -16,7 +16,7 @@ public class DataQueryResult
     public int DurationMs { get; init; }
     public string? ErrorMessage { get; init; }
 
-    /// <summary>Rough ~4-chars-per-token estimates (not a real tokenizer - see
+    /// <summary>Rough ~2-chars-per-token estimates (not a real tokenizer - see
     /// DataQueryService.EstimateTokens), before vs. after DataResultCompactor's denormalised-join
     /// collapsing. Only the "after" figure is ever actually sent to the model (that's Content) -
     /// "before" exists purely so the Helper Editor's Test query preview can show the real saving,

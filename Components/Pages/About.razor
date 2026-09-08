@@ -60,6 +60,10 @@
 
     private static readonly List<ReleaseNote> Releases =
     [
+        new("1.12", new DateTime(2026, 9, 8, 9, 30, 0),
+        [
+            "Corrected the token-usage estimate shown when testing a Data Source - it was assuming a similar ratio of characters-to-tokens as everyday written English, which understates the cost of dense, numeric/structured query results by a wide margin. Still a rough estimate, not a real token count, but noticeably closer to what a run actually gets billed."
+        ]),
         new("1.11", new DateTime(2026, 9, 7, 15, 35, 0),
         [
             "A Data Source can now optionally be shared, so other Helpers can attach the same live data feed instead of it being set up again from scratch - off by default, so anything Helper-specific or holding restricted data stays private unless you choose to share it.",

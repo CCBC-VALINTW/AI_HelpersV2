@@ -220,10 +220,16 @@ public class DataQueryService : IDataQueryService
         _ => Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? ""
     };
 
-    // A well-known, widely-used rough approximation (~4 characters per token for English-ish
-    // text) - deliberately not a real tokenizer. Bedrock only returns actual token counts after a
-    // real Converse call, which would mean spending real money and requiring a configured
-    // credential just to preview a Data Source - not worth it for what's meant to be a free,
-    // instant estimate. Good enough to show the shape of the saving, not exact to the token.
-    private static int EstimateTokens(string text) => (int)Math.Ceiling(text.Length / 4.0);
+    // ~2 characters per token, not the ~4 often quoted for English prose - this only ever
+    // estimates a Data Source's OWN formatted output (see FormatFlatCsv/FormatCompactedCsv/
+    // FormatFlatJson/FormatCompactedJson), which is always dense, structured, numeric/timestamp-
+    // heavy text (commas, colons, decimal points, short repeated tokens like "26-09-01 12:00"),
+    // not prose - a real tokenizer packs that far less efficiently than natural language. Real
+    // incident (2026-09-08): a Data Source estimated at ~37K tokens compacted was actually billed
+    // ~148K real input tokens by Bedrock for the same query - re-measured directly afterwards
+    // (same compacted content, 325,438 characters) confirmed a genuine ~2.2 characters/token real
+    // ratio for this kind of content, not ~4. Still deliberately not a real tokenizer - Bedrock
+    // only returns exact counts after a real, billed Converse call - so this remains an estimate,
+    // just a much less optimistic one for the content it's actually ever applied to.
+    private static int EstimateTokens(string text) => (int)Math.Ceiling(text.Length / 2.0);
 }

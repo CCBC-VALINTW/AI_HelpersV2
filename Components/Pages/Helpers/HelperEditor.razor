@@ -552,6 +552,12 @@ else
                                             <text> (@SavingPercent(okResult) fewer@(ds.CompactionEnabled ? "" : " - if enabled"))</text>
                                         }
                                     </div>
+                                    <div class="text-muted small fst-italic">
+                                        Rough estimate, not a real tokenizer - and only for this query's own result, not the
+                                        rest of the prompt. For data that changes over time (like a rolling date window), this
+                                        can go stale between tests - check a run's real cost afterwards (Admin → Cost Report)
+                                        rather than relying on this figure alone.
+                                    </div>
                                 }
                                 @if (ds.TestResult is { Success: true, Content: { } previewContent })
                                 {
