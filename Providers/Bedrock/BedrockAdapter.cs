@@ -104,6 +104,21 @@ public class BedrockAdapter(HttpClient httpClient, ICredentialStore credentialSt
 
     public async Task<LlmInvocationResult> InvokeAsync(LlmInvocationRequest request, CancellationToken cancellationToken = default)
     {
+        var body = BuildRequestBody(request.Helper, request.Model, request.UserInput, request.Attachments);
+        return await SendConverseRequestAsync(request.Model, body, cancellationToken);
+    }
+
+    public async Task<LlmInvocationResult> GetDataSourceAdviceAsync(LlmDefinition model, string query, string resultSample, int rowCount, bool truncated, int estimatedTokens, CancellationToken cancellationToken = default)
+    {
+        var body = BuildAdviceRequestBody(query, resultSample, rowCount, truncated, estimatedTokens);
+        return await SendConverseRequestAsync(model, body, cancellationToken);
+    }
+
+    /// <summary>Shared HTTP/credential/response-parsing plumbing behind both InvokeAsync (a full
+    /// document-generation call) and GetDataSourceAdviceAsync (a short advisory call) - only the
+    /// request body differs between the two.</summary>
+    private async Task<LlmInvocationResult> SendConverseRequestAsync(LlmDefinition model, JsonObject body, CancellationToken cancellationToken)
+    {
         var credential = await credentialStore.GetDefaultAsync<AwsCredentialPayload>(LlmProvider.AwsBedrock, cancellationToken)
             ?? throw new InvalidOperationException("No AWS Bedrock credential is configured. Set one at /admin (Credentials tab).");
 
@@ -112,9 +127,7 @@ public class BedrockAdapter(HttpClient httpClient, ICredentialStore credentialSt
             throw new NotSupportedException("Only bearer-token AWS credentials are supported right now - access key/secret needs SigV4 signing, not yet implemented.");
         }
 
-        var body = BuildRequestBody(request.Helper, request.Model, request.UserInput, request.Attachments);
-
-        var url = $"https://bedrock-runtime.{credential.Region}.amazonaws.com/model/{Uri.EscapeDataString(request.Model.Identifier)}/converse";
+        var url = $"https://bedrock-runtime.{credential.Region}.amazonaws.com/model/{Uri.EscapeDataString(model.Identifier)}/converse";
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
         {
             Content = JsonContent.Create(body)
@@ -145,6 +158,46 @@ public class BedrockAdapter(HttpClient httpClient, ICredentialStore credentialSt
             InputTokens = responseJson?["usage"]?["inputTokens"]?.GetValue<int>() ?? 0,
             OutputTokens = responseJson?["usage"]?["outputTokens"]?.GetValue<int>() ?? 0,
             StopReason = responseJson?["stopReason"]?.GetValue<string>()
+        };
+    }
+
+    // Deliberately terse and specific to what this needs to judge - a general "be helpful" system
+    // prompt invites generic padding ("consider adding an index", "review your schema") instead of
+    // the concrete, query-specific restructuring advice this exists for.
+    private const string AdvisorSystemPrompt =
+        "You are a terse, expert data-efficiency advisor for a system that runs a SQL query and " +
+        "folds its result directly into another AI's prompt. Given the query, the actual shape of " +
+        "its result, and its estimated token cost, suggest concrete, specific ways to reduce how " +
+        "much data is sent without losing information a report or analysis built from it would " +
+        "actually need - for example aggregating raw detail into per-entity summaries, collapsing " +
+        "repeated dimensions, filtering to only exceptional or notable rows instead of everything, " +
+        "or dropping unnecessary columns. Base your suggestions on the specific query and data " +
+        "shown, not generic database advice. If the current shape already looks reasonably " +
+        "efficient for what it needs to convey, say so plainly instead of manufacturing a " +
+        "suggestion. Reply in plain text only - 2 to 4 short paragraphs or a short bullet list, no " +
+        "HTML, no markdown code fences, and no rewritten SQL - describe the idea in words; the " +
+        "person configuring this Data Source will decide whether and how to implement it.";
+
+    private static JsonObject BuildAdviceRequestBody(string query, string resultSample, int rowCount, bool truncated, int estimatedTokens)
+    {
+        var userPrompt =
+            $"Query:\n{query}\n\n" +
+            $"Result shape: {rowCount} row(s){(truncated ? " (truncated - hit the configured row cap)" : "")}.\n\n" +
+            "Sample of the actual formatted result that would be sent to the model (may be cut short for length):\n" +
+            $"{resultSample}\n\n" +
+            $"Estimated tokens for this result as currently shaped: ~{estimatedTokens:N0}.";
+
+        return new JsonObject
+        {
+            ["system"] = new JsonArray(new JsonObject { ["text"] = AdvisorSystemPrompt }),
+            ["messages"] = new JsonArray(new JsonObject
+            {
+                ["role"] = "user",
+                ["content"] = new JsonArray(new JsonObject { ["text"] = userPrompt })
+            }),
+            // Small, fixed budget - this is meant to be a short piece of advice, not a document;
+            // deliberately independent of the Helper's own configured model.MaxTokens.
+            ["inferenceConfig"] = new JsonObject { ["maxTokens"] = 1024 }
         };
     }
 

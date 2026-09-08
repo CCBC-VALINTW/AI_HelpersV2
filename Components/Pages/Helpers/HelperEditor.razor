@@ -8,10 +8,13 @@
 @using AiHelpers.Services
 @using Microsoft.EntityFrameworkCore
 @inject AppDbContext Db
+@inject IDbContextFactory<AppDbContext> DbFactory
 @inject ICurrentUserService CurrentUser
 @inject IHelperInvocationService Invocation
 @inject IUrlFetchService UrlFetch
 @inject IDataQueryService DataQuery
+@inject IEnumerable<ILlmProviderAdapter> Adapters
+@inject ISpendStatusService SpendStatus
 @inject NavigationManager Nav
 
 <PageTitle>@(Id is null ? "New Helper" : "Edit Helper")</PageTitle>
@@ -558,6 +561,27 @@ else
                                         can go stale between tests - check a run's real cost afterwards (Admin → Cost Report)
                                         rather than relying on this figure alone.
                                     </div>
+                                    @if ((ds.CompactionEnabled ? okResult.EstimatedTokensAfterCompaction : okResult.EstimatedTokensBeforeCompaction) > 10_000)
+                                    {
+                                        <div class="mt-2">
+                                            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => AnalyzeDataSourceAsync(ds)"
+                                                    disabled="@(ds.AnalyzingAdvice || SelectedModel is null)">
+                                                @(ds.AnalyzingAdvice ? "Analysing…" : "Analyze for efficiency (real AI call)")
+                                            </button>
+                                            @if (SelectedModel is null)
+                                            {
+                                                <span class="text-muted small ms-1">Pick a model on the Model tab first.</span>
+                                            }
+                                        </div>
+                                        @if (ds.AdviceError is not null)
+                                        {
+                                            <div class="alert alert-danger small mt-2 mb-0">@ds.AdviceError</div>
+                                        }
+                                        @if (ds.AdviceText is not null)
+                                        {
+                                            <div class="alert alert-info small mt-2 mb-0" style="white-space: pre-wrap;">@ds.AdviceText</div>
+                                        }
+                                    }
                                 }
                                 @if (ds.TestResult is { Success: true, Content: { } previewContent })
                                 {
@@ -917,6 +941,13 @@ else
         // Test-only scratch state - never persisted.
         public bool Testing { get; set; }
         public DataQueryResult? TestResult { get; set; }
+
+        // Advisor-only scratch state - never persisted. A real, billed LLM call (see
+        // AnalyzeDataSourceAsync), so this is only ever triggered by an explicit click, never
+        // automatically.
+        public bool AnalyzingAdvice { get; set; }
+        public string? AdviceText { get; set; }
+        public string? AdviceError { get; set; }
     }
 
     private static bool IsValidDataSource(DataSourceDraft d) =>
@@ -965,10 +996,79 @@ else
 
         ds.Testing = true;
         ds.TestResult = null;
+        // Stale advice for the previous result is worse than no advice at all - clear it so it's
+        // never mistaken for commentary on whatever this new test run just produced.
+        ds.AdviceText = null;
+        ds.AdviceError = null;
         StateHasChanged();
 
         ds.TestResult = await DataQuery.ExecuteAsync(connection, ds.Query, ds.MaxRows, ds.OutputFormat, ds.CompactionEnabled);
         ds.Testing = false;
+    }
+
+    /// <summary>
+    /// Sends this Data Source's query, actual result shape and a sample of its formatted output to
+    /// the Helper's configured model, asking for plain-text suggestions on reducing its token cost
+    /// - see ILlmProviderAdapter.GetDataSourceAdviceAsync's own doc comment for why this is a
+    /// separate, minimal call shape rather than a real Helper run. A genuine, billed LLM call (same
+    /// spend-cap check and AccountingEntry as a real run), so only ever triggered by an explicit
+    /// click - the UI only offers it once the effective token estimate clears a threshold worth
+    /// spending real money to investigate (see the DataSources tab markup).
+    /// </summary>
+    private async Task AnalyzeDataSourceAsync(DataSourceDraft ds)
+    {
+        if (ds.TestResult is not { Success: true } result || SelectedModel is not { } model) return;
+
+        ds.AnalyzingAdvice = true;
+        ds.AdviceError = null;
+        ds.AdviceText = null;
+        StateHasChanged();
+
+        try
+        {
+            var (spend, cap) = await SpendStatus.RefreshAsync(_email);
+            if (spend >= cap)
+            {
+                ds.AdviceError = $"Monthly AI spend cap reached (£{spend:0.00} of £{cap:0.00}) - can't run the advisor right now.";
+                return;
+            }
+
+            var adapter = Adapters.FirstOrDefault(a => a.Provider == model.Provider);
+            if (adapter is null)
+            {
+                ds.AdviceError = $"No adapter available yet for {model.Provider}.";
+                return;
+            }
+
+            var effectiveTokens = ds.CompactionEnabled ? result.EstimatedTokensAfterCompaction : result.EstimatedTokensBeforeCompaction;
+            var advice = await adapter.GetDataSourceAdviceAsync(model, ds.Query, Truncate(result.Content ?? "", 4000), result.RowCount, result.Truncated, effectiveTokens);
+            ds.AdviceText = advice.Text;
+
+            var costUsd = (advice.InputTokens / 1000m) * (model.InputTokenCost ?? 0m) + (advice.OutputTokens / 1000m) * (model.OutputTokenCost ?? 0m);
+
+            // Own independent context for this save, not the shared circuit-scoped Db - same
+            // "don't contend with whatever page the user's navigated to since" reasoning as
+            // HelperInvocationService.RunAsync (see its own class doc comment).
+            await using var db = await DbFactory.CreateDbContextAsync();
+            db.AccountingEntries.Add(new AccountingEntry
+            {
+                UserId = _email,
+                HelperDefinitionId = Id,
+                HelperName = string.IsNullOrWhiteSpace(_name) ? "Data Source advice" : $"{_name.Trim()} (Data Source advice)",
+                UsdCost = costUsd,
+                Timestamp = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+            await SpendStatus.RefreshAsync(_email);
+        }
+        catch (Exception ex)
+        {
+            ds.AdviceError = ex.Message;
+        }
+        finally
+        {
+            ds.AnalyzingAdvice = false;
+        }
     }
 
     private static string Truncate(string text, int maxLength) =>

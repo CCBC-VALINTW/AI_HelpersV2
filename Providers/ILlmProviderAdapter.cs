@@ -7,6 +7,16 @@ public interface ILlmProviderAdapter
 {
     LlmProvider Provider { get; }
     Task<LlmInvocationResult> InvokeAsync(LlmInvocationRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// A short, real (billed) LLM call asking for plain-text suggestions on reducing how many
+    /// tokens a Data Source's query result costs, without losing information a report built from
+    /// it would need - see HelperEditor.razor's "Analyze for efficiency" button. Deliberately a
+    /// separate, minimal call shape from InvokeAsync - none of a real Helper run's document-
+    /// generation system prompts (HTML formatting, review footer, suggested-filename marker) make
+    /// sense for a short advisory response.
+    /// </summary>
+    Task<LlmInvocationResult> GetDataSourceAdviceAsync(LlmDefinition model, string query, string resultSample, int rowCount, bool truncated, int estimatedTokens, CancellationToken cancellationToken = default);
 }
 
 public class LlmInvocationRequest

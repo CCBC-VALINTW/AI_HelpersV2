@@ -60,6 +60,10 @@
 
     private static readonly List<ReleaseNote> Releases =
     [
+        new("1.13", new DateTime(2026, 9, 8, 11, 0, 0),
+        [
+            "Added an \"Analyze for efficiency\" button on a Data Source's Test query results, once its estimated token cost is large enough to be worth checking - asks the AI for specific suggestions on cutting how much data it needs to send (e.g. summarising instead of listing every row) without losing what a report built from it would actually need. A real, billed AI call, so it only ever runs when you click it."
+        ]),
         new("1.12", new DateTime(2026, 9, 8, 9, 30, 0),
         [
             "Corrected the token-usage estimate shown when testing a Data Source - it was assuming a similar ratio of characters-to-tokens as everyday written English, which understates the cost of dense, numeric/structured query results by a wide margin. Still a rough estimate, not a real token count, but noticeably closer to what a run actually gets billed."
