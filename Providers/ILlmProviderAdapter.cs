@@ -17,6 +17,17 @@ public interface ILlmProviderAdapter
     /// sense for a short advisory response.
     /// </summary>
     Task<LlmInvocationResult> GetDataSourceAdviceAsync(LlmDefinition model, string query, string resultSample, int rowCount, bool truncated, int estimatedTokens, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// A real (billed) LLM call that reads an attached document and returns plain text per
+    /// analysisPrompt's own instructions - generic over what's actually being asked for, so the
+    /// same call shape serves both of HelperEditor.razor's document-analysis actions ("suggest an
+    /// Output Format instruction from this example document" and "distil this Knowledge document
+    /// for token-efficient reuse"), just with a different analysisPrompt each time. Same
+    /// "deliberately minimal, no document-generation system prompts" reasoning as
+    /// GetDataSourceAdviceAsync.
+    /// </summary>
+    Task<LlmInvocationResult> GetDocumentAnalysisAsync(LlmDefinition model, Attachment document, string analysisPrompt, CancellationToken cancellationToken = default);
 }
 
 public class LlmInvocationRequest

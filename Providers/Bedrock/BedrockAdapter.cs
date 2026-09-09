@@ -114,6 +114,12 @@ public class BedrockAdapter(HttpClient httpClient, ICredentialStore credentialSt
         return await SendConverseRequestAsync(model, body, cancellationToken);
     }
 
+    public async Task<LlmInvocationResult> GetDocumentAnalysisAsync(LlmDefinition model, Attachment document, string analysisPrompt, CancellationToken cancellationToken = default)
+    {
+        var body = BuildDocumentAnalysisRequestBody(document, analysisPrompt);
+        return await SendConverseRequestAsync(model, body, cancellationToken);
+    }
+
     /// <summary>Shared HTTP/credential/response-parsing plumbing behind both InvokeAsync (a full
     /// document-generation call) and GetDataSourceAdviceAsync (a short advisory call) - only the
     /// request body differs between the two.</summary>
@@ -201,6 +207,82 @@ public class BedrockAdapter(HttpClient httpClient, ICredentialStore credentialSt
         };
     }
 
+    private static JsonObject BuildDocumentAnalysisRequestBody(Attachment document, string analysisPrompt)
+    {
+        var content = new JsonArray
+        {
+            document.Kind == AttachmentKind.Document
+                ? new JsonObject
+                {
+                    ["document"] = new JsonObject
+                    {
+                        ["name"] = SanitizeDocumentName(document.Name),
+                        ["format"] = document.Format,
+                        ["source"] = new JsonObject { ["bytes"] = Convert.ToBase64String(document.Bytes) }
+                    }
+                }
+                : new JsonObject
+                {
+                    ["image"] = new JsonObject
+                    {
+                        ["format"] = document.Format,
+                        ["source"] = new JsonObject { ["bytes"] = Convert.ToBase64String(document.Bytes) }
+                    }
+                },
+            new JsonObject { ["text"] = "Analyze the attached document as instructed above." }
+        };
+
+        return new JsonObject
+        {
+            ["system"] = new JsonArray(new JsonObject { ["text"] = analysisPrompt }),
+            ["messages"] = new JsonArray(new JsonObject { ["role"] = "user", ["content"] = content }),
+            // Generous enough for a real distillation of a substantial reference document (the
+            // Knowledge-distillation use case), not just a short suggestion - deliberately
+            // independent of the Helper's own configured model.MaxTokens, same reasoning as
+            // BuildAdviceRequestBody's own fixed budget.
+            ["inferenceConfig"] = new JsonObject { ["maxTokens"] = 3072 }
+        };
+    }
+
+    /// <summary>
+    /// Matches V1's "This is how you should use the knowledge document (if provided)" system
+    /// prompt entry when the raw document is actually attached (see
+    /// HelperInvocationService.BuildAttachments) - the document itself is a content block, this
+    /// just tells the model how to treat it. When KnowledgeOptimizationEnabled has taken the raw
+    /// attachment out of the picture entirely (see BuildAttachments' own doc comment), the
+    /// distilled text has to do the document's own job here instead - unlike the attached-document
+    /// case, this can't stay silent when there's no KnowledgePrompt, since there's no attachment
+    /// left for the model to have even noticed on its own.
+    /// </summary>
+    private static string? BuildKnowledgeSystemPrompt(HelperDefinition helper)
+    {
+        if (!helper.HasKnowledge) return null;
+
+        if (helper.KnowledgeOptimizationEnabled && !string.IsNullOrWhiteSpace(helper.KnowledgeDistilledText))
+        {
+            var usage = string.IsNullOrWhiteSpace(helper.KnowledgePrompt) ? "" : $" How to use it: {helper.KnowledgePrompt}";
+            return $"Reference material for this Helper (condensed from the original reference document):\n{helper.KnowledgeDistilledText}\n{usage}";
+        }
+
+        return string.IsNullOrWhiteSpace(helper.KnowledgePrompt)
+            ? null
+            : $"This is how you should use the attached reference document: {helper.KnowledgePrompt}";
+    }
+
+    /// <summary>
+    /// The layout description derived from a Helper's example output document (see
+    /// HelperDefinition.OutputTemplateInstruction), framed so the model knows what it's looking at.
+    /// Sent as its own system-prompt entry rather than merged into OutputFormat - the system array
+    /// already carries each concern as an independent instruction, so "alongside the Output format"
+    /// needs no string-level combining, and keeping them separate is what lets the derived half be
+    /// regenerated from a new example without disturbing the owner-authored half.
+    /// </summary>
+    private static string? BuildOutputTemplateSystemPrompt(HelperDefinition helper) =>
+        string.IsNullOrWhiteSpace(helper.OutputTemplateInstruction)
+            ? null
+            : "The following describes the layout of an example document this output should follow - " +
+              $"which sections appear, in what order, and what belongs in each:\n{helper.OutputTemplateInstruction}";
+
     private static JsonObject BuildRequestBody(HelperDefinition helper, LlmDefinition model, string userInput, IReadOnlyList<Attachment> attachments)
     {
         var systemPrompts = new[]
@@ -210,14 +292,15 @@ public class BedrockAdapter(HttpClient httpClient, ICredentialStore credentialSt
             helper.Methodology,
             helper.StyleTone,
             helper.OutputFormat,
+            // Immediately after OutputFormat (the format-related slot, so the two read together)
+            // and deliberately still BEFORE HtmlStructureReinforcement: that constant exists
+            // specifically to stop a "match this reference document's structure" instruction from
+            // producing untagged plain text (a real bug caught in testing - see its own comment),
+            // and this is exactly that class of instruction, so it must stay upstream of the fix.
+            BuildOutputTemplateSystemPrompt(helper),
             helper.TargetAudience,
             helper.SpecialInstructions,
-            // Matches V1's "This is how you should use the knowledge document (if provided)"
-            // system prompt entry - the document itself is attached as a content block (see
-            // HelperInvocationService.BuildAttachments), this just tells the model how to treat it.
-            helper.HasKnowledge && !string.IsNullOrWhiteSpace(helper.KnowledgePrompt)
-                ? $"This is how you should use the attached reference document: {helper.KnowledgePrompt}"
-                : null,
+            BuildKnowledgeSystemPrompt(helper),
             HtmlStructureReinforcement,
             ReviewFooterInstruction,
             helper.ContextQuestions.Count > 0 ? ContextAnswersReinforcement : null,

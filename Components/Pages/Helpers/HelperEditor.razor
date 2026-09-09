@@ -212,6 +212,68 @@ else
                     <label class="form-label" for="outputFormat">Output format</label>
                     <textarea id="outputFormat" class="form-control" rows="2" value="@_outputFormat"
                               @oninput="e => _outputFormat = e.Value?.ToString() ?? string.Empty"></textarea>
+
+                    <div class="border rounded p-2 mt-2">
+                        <p class="text-muted small mb-2">
+                            Optionally upload an example of the finished document you want (docx, pdf, html,
+                            etc.) and have the AI describe its layout - which sections appear, in what order,
+                            and what data belongs in each. That description is sent <em>alongside</em> the
+                            Output format instruction above on every run, never replacing it. The example
+                            document itself is only ever read for this analysis, never attached to a run.
+                        </p>
+                        @if (!string.IsNullOrWhiteSpace(_outputTemplateData))
+                        {
+                            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+                                <span class="text-muted small">Attached example (.@_outputTemplateFileType)</span>
+                                <div class="d-flex gap-3">
+                                    <a class="btn btn-link btn-sm p-0" href="@OutputTemplateDownloadUri()" download="@OutputTemplateDownloadFileName()">Download</a>
+                                    <button type="button" class="btn btn-link btn-sm p-0 text-danger" @onclick="RemoveOutputTemplate">Remove</button>
+                                </div>
+                            </div>
+                        }
+                        <div>
+                            <label class="form-label small mb-1" for="outputTemplateFile">@(string.IsNullOrWhiteSpace(_outputTemplateData) ? "Upload example document" : "Replace example document")</label>
+                            <InputFile id="outputTemplateFile" OnChange="OnOutputTemplateFileSelected" class="form-control form-control-sm" />
+                            @if (_outputTemplateError is not null)
+                            {
+                                <div class="text-danger small mt-1">@_outputTemplateError</div>
+                            }
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(_outputTemplateData))
+                        {
+                            <div class="mt-2">
+                                <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="AnalyzeOutputTemplateAsync"
+                                        disabled="@(_analyzingOutputTemplate || SelectedModel is null)">
+                                    @(_analyzingOutputTemplate
+                                        ? "Analysing…"
+                                        : string.IsNullOrWhiteSpace(_outputTemplateInstruction)
+                                            ? "Analyse layout of this example (real AI call)"
+                                            : "Re-analyse layout of this example (real AI call)")
+                                </button>
+                                @if (SelectedModel is null)
+                                {
+                                    <span class="text-muted small ms-1">Pick a model on the Model tab first.</span>
+                                }
+                            </div>
+                            @if (_outputTemplateAnalysisError is not null)
+                            {
+                                <div class="alert alert-danger small mt-2 mb-0">@_outputTemplateAnalysisError</div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(_outputTemplateInstruction))
+                            {
+                                <div class="mt-2">
+                                    <label class="form-label small mb-1" for="outputTemplateInstruction">Layout instruction derived from the example (sent with every run)</label>
+                                    <textarea id="outputTemplateInstruction" class="form-control form-control-sm" rows="8" value="@_outputTemplateInstruction"
+                                              @oninput="e => _outputTemplateInstruction = e.Value?.ToString() ?? string.Empty"></textarea>
+                                    <p class="text-muted small mb-0 mt-1">
+                                        Edits here are saved when you save the Helper. Re-analysing replaces this
+                                        outright rather than adding to it, so swapping the example document later
+                                        can't leave traces of the old one behind.
+                                    </p>
+                                </div>
+                            }
+                        }
+                    </div>
                 </div>
                 <div>
                     <label class="form-label" for="targetAudience">Target audience</label>
@@ -272,6 +334,54 @@ else
                         <textarea id="knowledgePrompt" class="form-control" rows="2" value="@_knowledgePrompt"
                                   @oninput="e => _knowledgePrompt = e.Value?.ToString() ?? string.Empty"></textarea>
                     </div>
+
+                    @if (!string.IsNullOrWhiteSpace(_knowledgeData))
+                    {
+                        <hr class="my-1" />
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="knowledgeOptimizationEnabled" checked="@_knowledgeOptimizationEnabled"
+                                   @onchange="e => _knowledgeOptimizationEnabled = (bool)e.Value!" />
+                            <label class="form-check-label" for="knowledgeOptimizationEnabled">Optimise for token usage</label>
+                        </div>
+                        <p class="text-muted small mb-1">
+                            Off by default: the full document above is sent, unmodified, on every run - the most
+                            faithful option, but the most expensive for anything more than a page or two. Switching
+                            this on stops sending the document itself and sends a condensed distillation instead
+                            (below) - cheaper on every run, but only as good as that distillation, which is never
+                            regenerated automatically.
+                        </p>
+                        <div class="d-flex align-items-center gap-2">
+                            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="AnalyzeAndDistillKnowledgeAsync"
+                                    disabled="@(_analyzingKnowledgeDistillation || SelectedModel is null)">
+                                @(_analyzingKnowledgeDistillation ? "Distilling…" : "Analyze & Distill (real AI call)")
+                            </button>
+                            @if (SelectedModel is null)
+                            {
+                                <span class="text-muted small">Pick a model on the Model tab first.</span>
+                            }
+                        </div>
+                        @if (_knowledgeDistillationError is not null)
+                        {
+                            <div class="alert alert-danger small mt-2 mb-0">@_knowledgeDistillationError</div>
+                        }
+                        @if (_knowledgeOptimizationEnabled && string.IsNullOrWhiteSpace(_knowledgeDistilledText))
+                        {
+                            <div class="alert alert-warning small mt-2 mb-0">
+                                Optimisation is on but nothing's been distilled yet - until you run Analyze &amp;
+                                Distill (and save), this Helper falls back to sending the full document, same as
+                                if optimisation were off.
+                            </div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(_knowledgeDistilledText))
+                        {
+                            <div class="mt-2">
+                                <label class="form-label small mb-1">Distilled text (what's actually sent when optimisation is on)</label>
+                                <textarea class="form-control form-control-sm font-monospace" rows="8" value="@_knowledgeDistilledText"
+                                          @oninput="e => _knowledgeDistilledText = e.Value?.ToString() ?? string.Empty"></textarea>
+                                <p class="text-muted small mb-0 mt-1">Edits here are saved when you save the Helper.</p>
+                            </div>
+                        }
+                    }
                 }
             </div>
         }
@@ -817,6 +927,32 @@ else
     private bool _showKnowledgeText;
     private string _knowledgeText = "";
 
+    // Opt-in, off by default (see HelperDefinition.KnowledgeOptimizationEnabled's own doc comment)
+    // - _knowledgeDistilledText is what a real run actually uses instead of the raw document once
+    // enabled, so it's directly editable here (unlike the Data Source advisor's suggestions, which
+    // are never auto-applied) - review-then-save is already this whole editor's save model, there's
+    // no separate "accept" step needed on top of that.
+    private bool _knowledgeOptimizationEnabled;
+    private string? _knowledgeDistilledText;
+    private bool _analyzingKnowledgeDistillation;
+    private string? _knowledgeDistillationError;
+
+    // A separate upload from Knowledge (a Helper can want both a live reference document AND a
+    // one-off output example) - persisted like Knowledge's own document fields, but never
+    // attached to a real run (see HelperDefinition.OutputTemplateData).
+    private string? _outputTemplateData;
+    private string? _outputTemplateFileType;
+    private string? _outputTemplateError;
+
+    // The analysis result is a persisted field in its own right, NOT a suggestion staged for
+    // copying into _outputFormat - it's sent to the model as its own separate system-prompt entry
+    // alongside _outputFormat (see HelperDefinition.OutputTemplateInstruction). Directly editable
+    // for the same reason _knowledgeDistilledText is: this text IS the artifact, and
+    // review-then-save is already this editor's whole save model.
+    private bool _analyzingOutputTemplate;
+    private string? _outputTemplateInstruction;
+    private string? _outputTemplateAnalysisError;
+
     private static readonly HashSet<string> TextKnowledgeFormats = ["txt", "md", "csv", "html", "htm", "vtt", "json"];
     private bool IsTextKnowledgeFormat => _knowledgeFileType is not null && TextKnowledgeFormats.Contains(_knowledgeFileType);
     private List<QuestionDraft> _contextQuestions = [];
@@ -1007,6 +1143,58 @@ else
     }
 
     /// <summary>
+    /// Shared "check the spend cap, resolve this Helper's model's adapter, run the call, record its
+    /// real cost" plumbing behind every one-off advisor/analysis action this editor offers (Data
+    /// Source advice, output-template suggestion, Knowledge distillation) - only what's actually
+    /// invoked differs between them. Returns (null, an error message) instead of throwing, so
+    /// callers can show it inline the same way a failed Test query does.
+    /// </summary>
+    private async Task<(string? Text, string? Error)> RunAdvisorCallAsync(string accountingLabel, Func<ILlmProviderAdapter, LlmDefinition, Task<LlmInvocationResult>> invoke)
+    {
+        if (SelectedModel is not { } model) return (null, "Pick a model on the Model tab first.");
+
+        var (spend, cap) = await SpendStatus.RefreshAsync(_email);
+        if (spend >= cap)
+        {
+            return (null, $"Monthly AI spend cap reached (£{spend:0.00} of £{cap:0.00}) - can't run this right now.");
+        }
+
+        var adapter = Adapters.FirstOrDefault(a => a.Provider == model.Provider);
+        if (adapter is null)
+        {
+            return (null, $"No adapter available yet for {model.Provider}.");
+        }
+
+        try
+        {
+            var result = await invoke(adapter, model);
+
+            var costUsd = (result.InputTokens / 1000m) * (model.InputTokenCost ?? 0m) + (result.OutputTokens / 1000m) * (model.OutputTokenCost ?? 0m);
+
+            // Own independent context for this save, not the shared circuit-scoped Db - same
+            // "don't contend with whatever page the user's navigated to since" reasoning as
+            // HelperInvocationService.RunAsync (see its own class doc comment).
+            await using var db = await DbFactory.CreateDbContextAsync();
+            db.AccountingEntries.Add(new AccountingEntry
+            {
+                UserId = _email,
+                HelperDefinitionId = Id,
+                HelperName = string.IsNullOrWhiteSpace(_name) ? accountingLabel : $"{_name.Trim()} ({accountingLabel})",
+                UsdCost = costUsd,
+                Timestamp = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+            await SpendStatus.RefreshAsync(_email);
+
+            return (result.Text, null);
+        }
+        catch (Exception ex)
+        {
+            return (null, ex.Message);
+        }
+    }
+
+    /// <summary>
     /// Sends this Data Source's query, actual result shape and a sample of its formatted output to
     /// the Helper's configured model, asking for plain-text suggestions on reducing its token cost
     /// - see ILlmProviderAdapter.GetDataSourceAdviceAsync's own doc comment for why this is a
@@ -1017,7 +1205,7 @@ else
     /// </summary>
     private async Task AnalyzeDataSourceAsync(DataSourceDraft ds)
     {
-        if (ds.TestResult is not { Success: true } result || SelectedModel is not { } model) return;
+        if (ds.TestResult is not { Success: true } result) return;
 
         ds.AnalyzingAdvice = true;
         ds.AdviceError = null;
@@ -1026,44 +1214,11 @@ else
 
         try
         {
-            var (spend, cap) = await SpendStatus.RefreshAsync(_email);
-            if (spend >= cap)
-            {
-                ds.AdviceError = $"Monthly AI spend cap reached (£{spend:0.00} of £{cap:0.00}) - can't run the advisor right now.";
-                return;
-            }
-
-            var adapter = Adapters.FirstOrDefault(a => a.Provider == model.Provider);
-            if (adapter is null)
-            {
-                ds.AdviceError = $"No adapter available yet for {model.Provider}.";
-                return;
-            }
-
             var effectiveTokens = ds.CompactionEnabled ? result.EstimatedTokensAfterCompaction : result.EstimatedTokensBeforeCompaction;
-            var advice = await adapter.GetDataSourceAdviceAsync(model, ds.Query, Truncate(result.Content ?? "", 4000), result.RowCount, result.Truncated, effectiveTokens);
-            ds.AdviceText = advice.Text;
-
-            var costUsd = (advice.InputTokens / 1000m) * (model.InputTokenCost ?? 0m) + (advice.OutputTokens / 1000m) * (model.OutputTokenCost ?? 0m);
-
-            // Own independent context for this save, not the shared circuit-scoped Db - same
-            // "don't contend with whatever page the user's navigated to since" reasoning as
-            // HelperInvocationService.RunAsync (see its own class doc comment).
-            await using var db = await DbFactory.CreateDbContextAsync();
-            db.AccountingEntries.Add(new AccountingEntry
-            {
-                UserId = _email,
-                HelperDefinitionId = Id,
-                HelperName = string.IsNullOrWhiteSpace(_name) ? "Data Source advice" : $"{_name.Trim()} (Data Source advice)",
-                UsdCost = costUsd,
-                Timestamp = DateTime.UtcNow
-            });
-            await db.SaveChangesAsync();
-            await SpendStatus.RefreshAsync(_email);
-        }
-        catch (Exception ex)
-        {
-            ds.AdviceError = ex.Message;
+            var (text, error) = await RunAdvisorCallAsync("Data Source advice",
+                (adapter, model) => adapter.GetDataSourceAdviceAsync(model, ds.Query, Truncate(result.Content ?? "", 4000), result.RowCount, result.Truncated, effectiveTokens));
+            ds.AdviceText = text;
+            ds.AdviceError = error;
         }
         finally
         {
@@ -1167,6 +1322,12 @@ else
         _knowledgeData = h.KnowledgeData;
         _knowledgeFileType = h.KnowledgeFileType;
         _knowledgePrompt = h.KnowledgePrompt ?? "";
+        _knowledgeOptimizationEnabled = h.KnowledgeOptimizationEnabled;
+        _knowledgeDistilledText = h.KnowledgeDistilledText;
+
+        _outputTemplateData = h.OutputTemplateData;
+        _outputTemplateFileType = h.OutputTemplateFileType;
+        _outputTemplateInstruction = h.OutputTemplateInstruction;
 
         _contextQuestions = h.ContextQuestions
             .OrderBy(q => q.SortOrder)
@@ -1261,6 +1422,9 @@ else
         _knowledgeFileType = null;
         _showKnowledgeText = false;
         _knowledgeText = "";
+        // A distillation derived from a document that's no longer there is worse than none at all.
+        _knowledgeDistilledText = null;
+        _knowledgeDistillationError = null;
     }
 
     private async Task OnKnowledgeFileSelected(InputFileChangeEventArgs e)
@@ -1291,6 +1455,10 @@ else
             _knowledgeFileType = extension;
             _showKnowledgeText = false;
             _knowledgeText = "";
+            // Same reasoning as RemoveKnowledge - a distillation of the PREVIOUS document has
+            // nothing to do with this new one.
+            _knowledgeDistilledText = null;
+            _knowledgeDistillationError = null;
         }
         catch (IOException)
         {
@@ -1314,12 +1482,12 @@ else
     }
 
     private string KnowledgeDownloadUri() =>
-        $"data:{KnowledgeMimeType()};base64,{_knowledgeData}";
+        $"data:{MimeTypeForExtension(_knowledgeFileType)};base64,{_knowledgeData}";
 
     private string KnowledgeDownloadFileName() =>
         $"{FileNameSanitizer.Sanitize(_name, fallback: "knowledge-document")}.{_knowledgeFileType}";
 
-    private string KnowledgeMimeType() => _knowledgeFileType switch
+    private static string MimeTypeForExtension(string? extension) => extension switch
     {
         "pdf" => "application/pdf",
         "csv" => "text/csv",
@@ -1333,6 +1501,185 @@ else
         "vtt" => "text/vtt",
         _ => "application/octet-stream"
     };
+
+    private Attachment? BuildKnowledgeAttachment()
+    {
+        if (string.IsNullOrWhiteSpace(_knowledgeData)) return null;
+        var classification = AttachmentClassifier.ClassifyExtension(_knowledgeFileType ?? "");
+        if (classification is not { } c) return null;
+
+        return new Attachment
+        {
+            Name = $"{_name} reference document",
+            Kind = c.Kind,
+            Format = c.Format,
+            Bytes = Convert.FromBase64String(_knowledgeData)
+        };
+    }
+
+    private async Task OnOutputTemplateFileSelected(InputFileChangeEventArgs e)
+    {
+        _outputTemplateError = null;
+        var file = e.File;
+        if (file is null) return;
+
+        var extension = System.IO.Path.GetExtension(file.Name).TrimStart('.').ToLowerInvariant();
+        if (AttachmentClassifier.ClassifyExtension(extension) is null)
+        {
+            _outputTemplateError = $"\"{file.Name}\" isn't a supported document type.";
+            return;
+        }
+
+        if (file.Size > MaxKnowledgeBytes)
+        {
+            _outputTemplateError = $"\"{file.Name}\" is too large ({file.Size / 1_000_000.0:0.0} MB) - the limit is {MaxKnowledgeBytes / 1_000_000.0:0.0} MB.";
+            return;
+        }
+
+        try
+        {
+            using var stream = file.OpenReadStream(maxAllowedSize: MaxKnowledgeBytes);
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer);
+            _outputTemplateData = Convert.ToBase64String(buffer.ToArray());
+            _outputTemplateFileType = extension;
+            // A layout instruction derived from the PREVIOUS example has nothing to do with this
+            // new one, and leaving it in place is exactly the "old template still influencing runs"
+            // problem this field's design is meant to avoid - same reasoning as
+            // OnKnowledgeFileSelected clearing its own distillation.
+            _outputTemplateInstruction = null;
+            _outputTemplateAnalysisError = null;
+        }
+        catch (IOException)
+        {
+            _outputTemplateError = $"\"{file.Name}\" is too large - the limit is {MaxKnowledgeBytes / 1_000_000.0:0.0} MB.";
+        }
+    }
+
+    private void RemoveOutputTemplate()
+    {
+        _outputTemplateData = null;
+        _outputTemplateFileType = null;
+        _outputTemplateInstruction = null;
+        _outputTemplateAnalysisError = null;
+    }
+
+    private string OutputTemplateDownloadUri() =>
+        $"data:{MimeTypeForExtension(_outputTemplateFileType)};base64,{_outputTemplateData}";
+
+    private string OutputTemplateDownloadFileName() =>
+        $"{FileNameSanitizer.Sanitize(_name, fallback: "output-example")}.{_outputTemplateFileType}";
+
+    private Attachment? BuildOutputTemplateAttachment()
+    {
+        if (string.IsNullOrWhiteSpace(_outputTemplateData)) return null;
+        var classification = AttachmentClassifier.ClassifyExtension(_outputTemplateFileType ?? "");
+        if (classification is not { } c) return null;
+
+        return new Attachment
+        {
+            Name = $"{_name} example output",
+            Kind = c.Kind,
+            Format = c.Format,
+            Bytes = Convert.FromBase64String(_outputTemplateData)
+        };
+    }
+
+    // Deliberately asks for a compact structural map, not a prose re-description of the document.
+    // The first version of this prompt asked the model to describe "structure, formatting
+    // conventions, tone and any other recurring pattern", which on a real, already-well-specified
+    // Helper produced an instruction nearly as long as the source document itself - all of it then
+    // re-sent on every single run. Layout, section order and what data belongs in each section are
+    // the parts a run genuinely can't re-derive on its own; tone/purpose/audience already have
+    // their own dedicated fields on the Prompt tab and don't need restating here.
+    private const string OutputTemplateAnalysisPrompt =
+        "You are helping configure an AI system that generates documents. The attached file is an " +
+        "EXAMPLE of the kind of document that system should produce. Describe its LAYOUT only, as a " +
+        "compact instruction to the generating AI: the sections in the order they appear, each " +
+        "section's heading text, and for each section what specific data or content belongs there " +
+        "and in what shape (prose, table with named columns, bulleted list, figure, etc.). Note " +
+        "which parts are fixed boilerplate that should appear verbatim every time, and which vary " +
+        "run to run. Do NOT restate the document's subject matter, tone, purpose or audience - " +
+        "those are configured separately. Do NOT reproduce the example's actual content or data " +
+        "values, and do not describe visual styling beyond structure. Be as brief as the layout " +
+        "allows, since this instruction is re-sent on every run. Reply with ONLY the instruction " +
+        "text - no preamble, no commentary, no markdown code fences - since it is used verbatim as " +
+        "a configuration field.";
+
+    private const string KnowledgeDistillationPrompt =
+        "You are helping configure an AI system that references a background document on every " +
+        "request it handles. The attached file is that reference document. Produce a condensed but " +
+        "complete distillation of its substantive content - preserve every fact, figure, rule, " +
+        "definition or instruction a future request might need to draw on, written as densely as " +
+        "possible while remaining fully faithful to the source. Remove only redundancy and filler, " +
+        "never substance. Reply with ONLY the distilled content itself - no preamble, no " +
+        "commentary - since it will be used verbatim in place of the original document.";
+
+    /// <summary>
+    /// Sends the uploaded example output document to the Helper's configured model, asking it to
+    /// derive a layout instruction from it - a real, billed call (see RunAdvisorCallAsync) - and
+    /// writes the result straight into _outputTemplateInstruction, its own persisted field.
+    /// <para>
+    /// Deliberately does NOT touch _outputFormat, and deliberately does not read it as input
+    /// either. The owner's own Output format text stays untouched (nothing they authored can be
+    /// lost), and because each analysis derives purely from the example document rather than from
+    /// whatever this field currently holds, re-analysing after swapping the example produces a
+    /// clean result every time - no compounding, no leftover influence from a previous example, no
+    /// drift across successive edits. Both instructions reach the model as separate system-prompt
+    /// entries (see BedrockAdapter.BuildOutputTemplateSystemPrompt), so "alongside" needs no
+    /// text-level merging at all.
+    /// </para>
+    /// </summary>
+    private async Task AnalyzeOutputTemplateAsync()
+    {
+        var document = BuildOutputTemplateAttachment();
+        if (document is null) return;
+
+        _analyzingOutputTemplate = true;
+        _outputTemplateAnalysisError = null;
+        StateHasChanged();
+
+        try
+        {
+            var (text, error) = await RunAdvisorCallAsync("Output layout analysis",
+                (adapter, model) => adapter.GetDocumentAnalysisAsync(model, document, OutputTemplateAnalysisPrompt));
+            if (text is not null) _outputTemplateInstruction = text;
+            _outputTemplateAnalysisError = error;
+        }
+        finally
+        {
+            _analyzingOutputTemplate = false;
+        }
+    }
+
+    /// <summary>
+    /// Sends the current Knowledge document to the Helper's configured model, asking for a
+    /// condensed distillation - written directly into _knowledgeDistilledText (unlike the output-
+    /// template suggestion above, this result IS the artifact KnowledgeOptimizationEnabled is
+    /// meant to use, not advice to manually apply elsewhere) for the owner to review/edit before
+    /// Save, same "nothing persists until Save" model as the rest of this editor.
+    /// </summary>
+    private async Task AnalyzeAndDistillKnowledgeAsync()
+    {
+        var document = BuildKnowledgeAttachment();
+        if (document is null) return;
+
+        _analyzingKnowledgeDistillation = true;
+        _knowledgeDistillationError = null;
+        StateHasChanged();
+
+        try
+        {
+            var (text, error) = await RunAdvisorCallAsync("Knowledge distillation",
+                (adapter, model) => adapter.GetDocumentAnalysisAsync(model, document, KnowledgeDistillationPrompt));
+            if (text is not null) _knowledgeDistilledText = text;
+            _knowledgeDistillationError = error;
+        }
+        finally
+        {
+            _analyzingKnowledgeDistillation = false;
+        }
+    }
 
     private async Task OnPreviewContextFileSelected(QuestionDraft question, InputFileChangeEventArgs e)
     {
@@ -1418,12 +1765,18 @@ else
         Methodology = NullIfBlank(_methodology),
         StyleTone = NullIfBlank(_styleTone),
         OutputFormat = NullIfBlank(_outputFormat),
+        // Preview must exercise the same prompt assembly a real run does - this reaches the model
+        // as its own system-prompt entry, so leaving it out would make a preview silently test a
+        // different prompt than the one that ships.
+        OutputTemplateInstruction = string.IsNullOrWhiteSpace(_outputTemplateData) ? null : NullIfBlank(_outputTemplateInstruction),
         TargetAudience = NullIfBlank(_targetAudience),
         SpecialInstructions = NullIfBlank(_specialInstructions),
         HasKnowledge = _hasKnowledge && !string.IsNullOrWhiteSpace(_knowledgeData),
         KnowledgeData = _hasKnowledge ? _knowledgeData : null,
         KnowledgeFileType = _hasKnowledge ? _knowledgeFileType : null,
         KnowledgePrompt = _hasKnowledge ? NullIfBlank(_knowledgePrompt) : null,
+        KnowledgeOptimizationEnabled = _hasKnowledge && _knowledgeOptimizationEnabled,
+        KnowledgeDistilledText = _hasKnowledge ? NullIfBlank(_knowledgeDistilledText) : null,
         ContextQuestionsIntro = NullIfBlank(_contextQuestionsIntro),
         IsContextDriven = _isContextDriven,
         // DataConnection populated directly from the already-loaded _dataConnections list (not a
@@ -1587,6 +1940,12 @@ else
         entity.KnowledgeData = entity.HasKnowledge ? _knowledgeData : null;
         entity.KnowledgeFileType = entity.HasKnowledge ? _knowledgeFileType : null;
         entity.KnowledgePrompt = entity.HasKnowledge ? NullIfBlank(_knowledgePrompt) : null;
+        entity.KnowledgeOptimizationEnabled = entity.HasKnowledge && _knowledgeOptimizationEnabled;
+        entity.KnowledgeDistilledText = entity.HasKnowledge ? NullIfBlank(_knowledgeDistilledText) : null;
+
+        entity.OutputTemplateData = NullIfBlank(_outputTemplateData);
+        entity.OutputTemplateFileType = string.IsNullOrWhiteSpace(_outputTemplateData) ? null : _outputTemplateFileType;
+        entity.OutputTemplateInstruction = string.IsNullOrWhiteSpace(_outputTemplateData) ? null : NullIfBlank(_outputTemplateInstruction);
 
         entity.ContextQuestionsIntro = NullIfBlank(_contextQuestionsIntro);
         entity.IsContextDriven = _isContextDriven;

@@ -60,6 +60,11 @@
 
     private static readonly List<ReleaseNote> Releases =
     [
+        new("1.14", new DateTime(2026, 9, 8, 17, 30, 0),
+        [
+            "Added a separate \"example output document\" upload next to the Output format field - upload an example of the finished document you want and the AI will describe its layout (which sections appear, in what order, and what data belongs in each), which is then sent alongside your own Output format instruction on every run to make output match that layout more consistently. Your Output format text is never overwritten, and the example document itself is only read once during analysis, never sent on a real run.",
+            "Added an opt-in \"Optimise for token usage\" switch for Knowledge documents - instead of sending the full document on every run, a one-off AI pass distils it into a condensed version that's used instead, cutting the ongoing cost for larger reference documents. Off by default; nothing changes for a Helper until its owner turns it on."
+        ]),
         new("1.13", new DateTime(2026, 9, 8, 11, 0, 0),
         [
             "Added an \"Analyze for efficiency\" button on a Data Source's Test query results, once its estimated token cost is large enough to be worth checking - asks the AI for specific suggestions on cutting how much data it needs to send (e.g. summarising instead of listing every row) without losing what a report built from it would actually need. A real, billed AI call, so it only ever runs when you click it."

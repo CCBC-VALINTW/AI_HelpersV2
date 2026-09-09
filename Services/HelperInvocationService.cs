@@ -134,10 +134,18 @@ public class HelperInvocationService(IDbContextFactory<AppDbContext> dbFactory, 
     /// (HasKnowledge/KnowledgeData/KnowledgeFileType) but never actually sent it. Prepended ahead
     /// of any user-uploaded attachments, matching V1's behaviour of always including it when
     /// configured, not depending on the user separately re-attaching it each run.
+    ///
+    /// Skipped entirely (2026-09-08) when KnowledgeOptimizationEnabled has a real distilled text to
+    /// use instead - see BedrockAdapter.BuildKnowledgeSystemPrompt, which folds
+    /// KnowledgeDistilledText into the system prompt as plain text in that case. The whole point of
+    /// that opt-in is to stop paying to resend/re-process the raw document's tokens on every run,
+    /// so the raw attachment must genuinely disappear, not just get supplemented by the distilled
+    /// text alongside it.
     /// </summary>
     private static IReadOnlyList<Attachment> BuildAttachments(HelperDefinition helper, IReadOnlyList<Attachment>? uploaded)
     {
-        if (!helper.HasKnowledge || string.IsNullOrWhiteSpace(helper.KnowledgeData))
+        var usingDistilledKnowledge = helper.KnowledgeOptimizationEnabled && !string.IsNullOrWhiteSpace(helper.KnowledgeDistilledText);
+        if (!helper.HasKnowledge || string.IsNullOrWhiteSpace(helper.KnowledgeData) || usingDistilledKnowledge)
         {
             return uploaded ?? [];
         }

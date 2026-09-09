@@ -72,6 +72,44 @@ public class HelperDefinition
     public string? KnowledgeFileType { get; set; }
     public string? KnowledgePrompt { get; set; }
 
+    /// <summary>When true (opt-in, off by default), the Knowledge document is NOT attached to a
+    /// real run at all - KnowledgeDistilledText is folded into the system prompt as plain text
+    /// instead, so a real run stops paying to resend/re-process the raw file's tokens every single
+    /// time. Off by default so nothing changes for a Helper already relying on the model seeing the
+    /// full original document until its owner deliberately opts in - see KnowledgeDistilledText's
+    /// own doc comment for the real tradeoff this makes.</summary>
+    public bool KnowledgeOptimizationEnabled { get; set; }
+
+    /// <summary>A condensed distillation of KnowledgeData, produced by a one-off AI analysis pass
+    /// (see HelperEditor.razor's "Analyze &amp; Distill" action) - never generated automatically,
+    /// and never used unless KnowledgeOptimizationEnabled is also true. Deliberately lossy: this
+    /// trades some fidelity to the original document for a large, ongoing token saving on every
+    /// real run - the same shape of tradeoff as DataResultCompactor's compaction, just for
+    /// unstructured reference documents instead of query results. Null until analysis has actually
+    /// been run once.</summary>
+    public string? KnowledgeDistilledText { get; set; }
+
+    /// <summary>An optional example of the finished document this Helper should produce (docx,
+    /// pdf, html, etc.) - held purely so its owner can ask the AI to derive an OutputFormat
+    /// instruction from it (see HelperEditor.razor's "Suggest Output format from this example").
+    /// Deliberately separate from KnowledgeData: a Helper can need a live reference document
+    /// AND a one-off output example at the same time, and unlike Knowledge, this is NEVER
+    /// attached to a real run - HelperInvocationService has no reason to ever read this field.</summary>
+    public string? OutputTemplateData { get; set; }
+    public string? OutputTemplateFileType { get; set; }
+
+    /// <summary>A layout description derived from OutputTemplateData by a one-off AI analysis pass
+    /// (see HelperEditor.razor's "Analyse layout of this example") - which sections appear, in what
+    /// order, and what data belongs in each. Sent to the model as its own system-prompt entry
+    /// alongside OutputFormat rather than being merged into it: OutputFormat stays purely
+    /// owner-authored, and because each analysis is derived only from the example document (never
+    /// from this field's own previous value), swapping the example and re-analysing replaces this
+    /// cleanly instead of compounding successive templates' influence on top of each other. Null
+    /// until analysis has actually been run, and cleared whenever the example document is replaced
+    /// or removed, since a layout description of a document that's no longer there is worse than
+    /// none.</summary>
+    public string? OutputTemplateInstruction { get; set; }
+
     /// <summary>When true, this Helper proxies to an external URL rather than calling the LLM directly.</summary>
     public bool IsExternal { get; set; }
     public string? ExternalUrl { get; set; }

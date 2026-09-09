@@ -4,6 +4,7 @@ using AiHelpers.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace AiHelpers.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260909103420_AddOutputTemplateInstruction")]
+    partial class AddOutputTemplateInstruction
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -734,9 +737,9 @@ namespace AiHelpers.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
-                    b.Property<decimal?>("InputTokenCost")
-                        .HasPrecision(8, 5)
-                        .HasColumnType("decimal(8,5)");
+                    b.Property<decimal?>("InputCostPerMillionTokens")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("decimal(10,4)");
 
                     b.Property<int?>("MaxTokens")
                         .HasColumnType("int");
@@ -746,9 +749,9 @@ namespace AiHelpers.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
-                    b.Property<decimal?>("OutputTokenCost")
-                        .HasPrecision(8, 5)
-                        .HasColumnType("decimal(8,5)");
+                    b.Property<decimal?>("OutputCostPerMillionTokens")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("decimal(10,4)");
 
                     b.Property<string>("Provider")
                         .IsRequired()
