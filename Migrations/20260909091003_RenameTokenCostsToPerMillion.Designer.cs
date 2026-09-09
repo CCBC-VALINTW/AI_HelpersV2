@@ -4,6 +4,7 @@ using AiHelpers.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace AiHelpers.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260909091003_RenameTokenCostsToPerMillion")]
+    partial class RenameTokenCostsToPerMillion
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -639,9 +642,6 @@ namespace AiHelpers.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("OutputTemplateFileType")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("OutputTemplateInstruction")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("OwnerEmail")

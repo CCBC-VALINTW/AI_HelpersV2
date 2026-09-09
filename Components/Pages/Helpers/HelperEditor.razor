@@ -1169,7 +1169,7 @@ else
         {
             var result = await invoke(adapter, model);
 
-            var costUsd = (result.InputTokens / 1000m) * (model.InputTokenCost ?? 0m) + (result.OutputTokens / 1000m) * (model.OutputTokenCost ?? 0m);
+            var costUsd = (result.InputTokens / 1_000_000m) * (model.InputCostPerMillionTokens ?? 0m) + (result.OutputTokens / 1_000_000m) * (model.OutputCostPerMillionTokens ?? 0m);
 
             // Own independent context for this save, not the shared circuit-scoped Db - same
             // "don't contend with whatever page the user's navigated to since" reasoning as

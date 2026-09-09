@@ -94,8 +94,10 @@ static async Task MigrateLlmDefinitionsAsync(SqlConnection source, AppDbContext 
             SupportsText = !reader.IsDBNull(7) && reader.GetBoolean(7),
             SupportsDocument = !reader.IsDBNull(8) && reader.GetBoolean(8),
             SupportsImage = !reader.IsDBNull(9) && reader.GetBoolean(9),
-            InputTokenCost = reader.IsDBNull(10) ? null : reader.GetDecimal(10),
-            OutputTokenCost = reader.IsDBNull(11) ? null : reader.GetDecimal(11),
+            // V1's InTokCost/OutTokCost were per-1,000 tokens; V2 moved to per-million to match how
+            // providers publish pricing today, so these are scaled up x1,000 on the way in.
+            InputCostPerMillionTokens = reader.IsDBNull(10) ? null : reader.GetDecimal(10) * 1000m,
+            OutputCostPerMillionTokens = reader.IsDBNull(11) ? null : reader.GetDecimal(11) * 1000m,
             SupportsReasoning = !reader.IsDBNull(12) && reader.GetBoolean(12),
             ReasoningTokens = reader.IsDBNull(13) ? null : reader.GetInt32(13),
             Residency = MapResidency(reader.IsDBNull(14) ? "GL" : reader.GetString(14))

@@ -46,8 +46,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(p => p.Description).HasMaxLength(2048).IsRequired();
             e.Property(p => p.DefaultAdherence).HasPrecision(8, 5);
             e.Property(p => p.DefaultCreativity).HasPrecision(8, 5);
-            e.Property(p => p.InputTokenCost).HasPrecision(8, 5);
-            e.Property(p => p.OutputTokenCost).HasPrecision(8, 5);
+            // Widened from decimal(8,5) alongside the per-1,000 -> per-million rename - a per-1,000
+            // rate of .02500 (the highest seen in practice) becomes 25.0000 per million, so scale 4
+            // still covers it with a digit of headroom rather than sitting right at scale 5's limit.
+            e.Property(p => p.InputCostPerMillionTokens).HasPrecision(10, 4);
+            e.Property(p => p.OutputCostPerMillionTokens).HasPrecision(10, 4);
             e.Property(p => p.Residency).HasConversion<string>().HasMaxLength(10);
             // Not unique: multiple named definitions (e.g. a pinned version vs. a "latest stable"
             // alias) can legitimately point at the same underlying provider model identifier.

@@ -60,6 +60,10 @@
 
     private static readonly List<ReleaseNote> Releases =
     [
+        new("1.15", new DateTime(2026, 9, 9, 9, 30, 0),
+        [
+            "LLM model costs in Admin are now entered and stored as USD per 1,000,000 tokens instead of per 1,000 - matching how providers publish pricing today. Every existing model's cost was automatically converted to the equivalent per-million rate, so nothing changes about what a run actually costs."
+        ]),
         new("1.14", new DateTime(2026, 9, 8, 17, 30, 0),
         [
             "Added a separate \"example output document\" upload next to the Output format field - upload an example of the finished document you want and the AI will describe its layout (which sections appear, in what order, and what data belongs in each), which is then sent alongside your own Output format instruction on every run to make output match that layout more consistently. Your Output format text is never overwritten, and the example document itself is only read once during analysis, never sent on a real run.",

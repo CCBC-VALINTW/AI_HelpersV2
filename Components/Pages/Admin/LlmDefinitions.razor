@@ -10,7 +10,7 @@
 
 <p class="text-muted">
     The models a Helper can be assigned in the Helper Editor - what each one can accept, its
-    output-token ceiling, reasoning behaviour, and per-1,000-token cost used for spend tracking.
+    output-token ceiling, reasoning behaviour, and per-million-token cost used for spend tracking.
 </p>
 
 @if (_loading)
@@ -163,15 +163,15 @@ else
                     </div>
                 }
 
-                <h6>Cost (USD per 1,000 tokens)</h6>
+                <h6>Cost (USD per 1,000,000 tokens)</h6>
                 <div class="row g-3 mb-3">
                     <div class="col-md-6">
                         <label class="form-label" for="llmInputCost">Input token cost</label>
-                        <InputNumber id="llmInputCost" class="form-control" @bind-Value="_form.InputTokenCost" step="0.00001" />
+                        <InputNumber id="llmInputCost" class="form-control" @bind-Value="_form.InputCostPerMillionTokens" step="0.01" />
                     </div>
                     <div class="col-md-6">
                         <label class="form-label" for="llmOutputCost">Output token cost</label>
-                        <InputNumber id="llmOutputCost" class="form-control" @bind-Value="_form.OutputTokenCost" step="0.00001" />
+                        <InputNumber id="llmOutputCost" class="form-control" @bind-Value="_form.OutputCostPerMillionTokens" step="0.01" />
                     </div>
                 </div>
 
@@ -237,8 +237,8 @@ else
             SupportsReasoning = m.SupportsReasoning,
             ReasoningTokens = m.ReasoningTokens,
             UsesAdaptiveThinking = m.UsesAdaptiveThinking,
-            InputTokenCost = m.InputTokenCost,
-            OutputTokenCost = m.OutputTokenCost
+            InputCostPerMillionTokens = m.InputCostPerMillionTokens,
+            OutputCostPerMillionTokens = m.OutputCostPerMillionTokens
         };
         _saveError = null;
     }
@@ -298,8 +298,8 @@ else
         m.SupportsReasoning = _form.SupportsReasoning;
         m.ReasoningTokens = _form.SupportsReasoning && !_form.UsesAdaptiveThinking ? _form.ReasoningTokens : null;
         m.UsesAdaptiveThinking = _form.SupportsReasoning && _form.UsesAdaptiveThinking;
-        m.InputTokenCost = _form.InputTokenCost;
-        m.OutputTokenCost = _form.OutputTokenCost;
+        m.InputCostPerMillionTokens = _form.InputCostPerMillionTokens;
+        m.OutputCostPerMillionTokens = _form.OutputCostPerMillionTokens;
     }
 
     private async Task DeleteAsync(LlmDefinition m)
@@ -331,7 +331,7 @@ else
         public bool SupportsReasoning { get; set; }
         public int? ReasoningTokens { get; set; }
         public bool UsesAdaptiveThinking { get; set; }
-        public decimal? InputTokenCost { get; set; }
-        public decimal? OutputTokenCost { get; set; }
+        public decimal? InputCostPerMillionTokens { get; set; }
+        public decimal? OutputCostPerMillionTokens { get; set; }
     }
 }

@@ -86,12 +86,13 @@ public class HelperInvocationService(IDbContextFactory<AppDbContext> dbFactory, 
         // V1's AI_LogAccountingCost stored procedure computed this as integer division
         // (@InputTokens/1000) before multiplying by cost, silently truncating to zero cost for
         // any call under 1000 tokens. Doing the division in decimal here instead.
-        // Deliberately left in USD (LlmDefinition.InputTokenCost/OutputTokenCost are the
-        // provider's own USD list prices) - GBP conversion happens only where this is
-        // aggregated/displayed (SpendStatusService.UsdToGbpRate), not baked in here, so this
-        // stays a straight, unconverted record of what the call actually cost AWS.
-        var costUsd = (result.InputTokens / 1000m) * (helper.LlmDefinition.InputTokenCost ?? 0m)
-            + (result.OutputTokens / 1000m) * (helper.LlmDefinition.OutputTokenCost ?? 0m);
+        // Deliberately left in USD (LlmDefinition.InputCostPerMillionTokens/
+        // OutputCostPerMillionTokens are the provider's own USD list prices, per 1,000,000 tokens)
+        // - GBP conversion happens only where this is aggregated/displayed
+        // (SpendStatusService.UsdToGbpRate), not baked in here, so this stays a straight,
+        // unconverted record of what the call actually cost AWS.
+        var costUsd = (result.InputTokens / 1_000_000m) * (helper.LlmDefinition.InputCostPerMillionTokens ?? 0m)
+            + (result.OutputTokens / 1_000_000m) * (helper.LlmDefinition.OutputCostPerMillionTokens ?? 0m);
 
         db.AccountingEntries.Add(new AccountingEntry
         {

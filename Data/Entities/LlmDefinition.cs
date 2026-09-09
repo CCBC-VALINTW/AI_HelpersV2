@@ -29,8 +29,13 @@ public class LlmDefinition
     /// (e.g. via Bedrock's tool-forcing), rather than relying on prompting alone.</summary>
     public bool SupportsStructuredOutput { get; set; }
 
-    public decimal? InputTokenCost { get; set; }
-    public decimal? OutputTokenCost { get; set; }
+    /// <summary>USD cost per 1,000,000 tokens - matches how providers (AWS Bedrock included)
+    /// publish pricing today. Renamed from InputTokenCost/OutputTokenCost (which held a per-1,000
+    /// rate) when providers moved to quoting per-million; existing values were multiplied by 1,000
+    /// in the same migration that renamed these columns - see
+    /// Migrations/*_RenameTokenCostsToPerMillion.</summary>
+    public decimal? InputCostPerMillionTokens { get; set; }
+    public decimal? OutputCostPerMillionTokens { get; set; }
 
     public bool SupportsReasoning { get; set; }
     public int? ReasoningTokens { get; set; }
