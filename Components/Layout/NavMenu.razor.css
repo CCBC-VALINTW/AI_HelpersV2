@@ -95,6 +95,33 @@
         background-color: rgba(255, 255, 255, 0.1);
     }
 
+/* Only ever rendered when IWebHostEnvironment.IsDevelopment() is true - see NavMenu's own
+   _isDevelopment field. Sits inside .nav-scrollable (not .top-row) so it scrolls with the rest of
+   the nav rather than upsetting .top-row's height, which .nav-scrollable's own
+   calc(100vh - 3.5rem) sizing assumes is fixed. */
+.dev-environment-notice {
+    margin: 0.75rem 0.75rem 0.25rem;
+    padding: 0.6rem 0.75rem;
+    background-color: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: #f5dede;
+}
+
+    .dev-environment-notice p {
+        margin-bottom: 0.35rem;
+    }
+
+    .dev-environment-notice a {
+        color: white;
+        text-decoration: underline;
+    }
+
+    .dev-environment-notice a:hover {
+        color: #f5dede;
+    }
+
 .nav-item {
     font-size: 0.9rem;
     padding-bottom: 0.5rem;

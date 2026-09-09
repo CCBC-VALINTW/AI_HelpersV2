@@ -60,6 +60,10 @@
 
     private static readonly List<ReleaseNote> Releases =
     [
+        new("1.16", new DateTime(2026, 9, 9, 11, 0, 0),
+        [
+            "The development environment now visibly marks itself as such - the left-hand navigation pane turns red with a notice explaining it's the active development environment and may be unstable, with a link across to the production site. Never shown outside development."
+        ]),
         new("1.15", new DateTime(2026, 9, 9, 9, 30, 0),
         [
             "LLM model costs in Admin are now entered and stored as USD per 1,000,000 tokens instead of per 1,000 - matching how providers publish pricing today. Every existing model's cost was automatically converted to the equivalent per-million rate, so nothing changes about what a run actually costs."

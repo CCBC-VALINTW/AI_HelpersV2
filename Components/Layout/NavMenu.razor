@@ -13,6 +13,14 @@
 <input type="checkbox" title="Navigation menu" class="navbar-toggler" />
 
 <div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+    @if (_isDevelopment)
+    {
+        <div class="dev-environment-notice">
+            <p class="mb-1"><strong>Development environment</strong></p>
+            <p class="mb-1">This is the active development environment and may be unstable.</p>
+            <a href="https://aihelpers.corp.conwy.gov.uk">Go to the production site</a>
+        </div>
+    }
     <nav class="nav flex-column">
         <div class="nav-item px-3">
             <NavLink class="nav-link" href="" Match="NavLinkMatch.All" title="Home">
@@ -72,13 +80,20 @@
 @code {
     [Inject] private Services.ICurrentUserService CurrentUser { get; set; } = default!;
     [Inject] private Services.IFeedbackPromptService FeedbackPrompt { get; set; } = default!;
+    [Inject] private IWebHostEnvironment Env { get; set; } = default!;
 
     private bool _isAdmin;
     private bool _shouldPulse;
 
+    // Same real-hosting-environment read as MainLayout's own IsDevelopment - kept as an
+    // independent check here rather than a cascading parameter from MainLayout, since it's a
+    // single cheap DI call and this component already injects its own services.
+    private bool _isDevelopment;
+
     protected override async Task OnInitializedAsync()
     {
         _isAdmin = await CurrentUser.IsAdminAsync();
+        _isDevelopment = Env.IsDevelopment();
         FeedbackPrompt.RunCompleted += OnRunCompleted;
     }
 

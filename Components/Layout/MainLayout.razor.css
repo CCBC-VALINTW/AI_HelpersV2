@@ -12,6 +12,16 @@ main {
     background-image: linear-gradient(180deg, var(--conwy-ramp-2) 0%, var(--conwy-ramp-1) 70%);
 }
 
+/* Deliberately overrides the gradient directly rather than redefining --conwy-ramp-1/2 - those
+   variables are read all over the app (button hovers, category tile borders, admin headers), and
+   the ask was to recolour this one pane, not repaint the whole interface red. Same two gradient
+   stops, same lightness/saturation balance as the corporate blues above, just shifted to a red
+   hue - existing nav-link colours (tuned for contrast against the corporate gradient) stay legible
+   against this one too. */
+.sidebar-dev {
+    background-image: linear-gradient(180deg, #7a1f1f 0%, #a83232 70%);
+}
+
 .sidebar-collapse-checkbox {
     display: none;
 }
