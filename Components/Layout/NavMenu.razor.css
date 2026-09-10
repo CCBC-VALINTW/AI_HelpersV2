@@ -23,6 +23,10 @@
     flex-direction: column;
     align-items: stretch;
     padding-bottom: 0.75rem;
+    /* As a flex item of .sidebar (MainLayout.razor.css) this would otherwise shrink towards its
+       min-height when the menu below is tall, squashing the brand row and clipping the badge -
+       measured at 112px normally, 56px with a long nav. Only .nav-scrollable should ever give way. */
+    flex-shrink: 0;
 }
 
 .navbar-brand {
@@ -122,6 +126,30 @@
         color: #f5dede;
     }
 
+/* margin-top: auto is what puts this against the bottom of the pane - only effective because
+   .sidebar is a flex column (MainLayout.razor.css). On narrow screens the sidebar is a plain
+   top bar and this simply follows the menu in normal flow, which is fine. */
+.app-version {
+    margin-top: auto;
+    padding: 0.5rem 1.25rem 0.75rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    font-size: 0.75rem;
+    /* Same reasoning as .top-row's own flex-shrink - the version line shouldn't be squeezed out of
+       existence by a tall menu, it's the one thing here that should always be readable. */
+    flex-shrink: 0;
+}
+
+    .app-version a {
+        /* Same lightened grey the nav links use, for the same contrast reason - see .nav-link. */
+        color: #dddddd;
+        text-decoration: none;
+    }
+
+    .app-version a:hover {
+        color: white;
+        text-decoration: underline;
+    }
+
 .nav-item {
     font-size: 0.9rem;
     padding-bottom: 0.5rem;
@@ -209,8 +237,15 @@
         /* Never collapse the sidebar for wide screens */
         display: block;
 
-        /* Allow sidebar to scroll for tall menus */
-        height: calc(100vh - 3.5rem);
+        /* Takes whatever height is left below .top-row (see .sidebar's flex column in
+           MainLayout.razor.css), rather than the height: calc(100vh - 3.5rem) this used to
+           hardcode. That calc assumed .top-row was 3.5rem tall, but it stacks the brand row AND
+           the "Built by Conwy" badge row, so it's more like 7rem - leaving this box taller than
+           the space it actually had and producing a scrollbar on a nav that had nothing to scroll.
+           min-height: 0 is what lets a flex item shrink below its content height, so overflow-y
+           still kicks in for a genuinely long menu instead of the pane growing past the viewport. */
+        flex: 1 1 auto;
+        min-height: 0;
         overflow-y: auto;
     }
 

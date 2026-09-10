@@ -95,6 +95,12 @@ main {
         top: 0;
         transition: width 0.15s ease;
         overflow-x: hidden;
+        /* NavMenu renders no wrapper of its own, so its .top-row / .nav-scrollable / version footer
+           are direct children here - making this the flex column lets .nav-scrollable claim exactly
+           the leftover height (see its own comment for the scrollbar bug that fixed) and lets the
+           version footer sit against the bottom edge. */
+        display: flex;
+        flex-direction: column;
     }
 
     .sidebar-collapse-checkbox:checked ~ .sidebar {

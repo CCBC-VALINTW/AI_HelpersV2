@@ -76,6 +76,17 @@
     </nav>
 </div>
 
+@* Outside .nav-scrollable deliberately, so it's a direct child of .sidebar and can be pushed to the
+   bottom edge rather than trailing the last nav link. Carries nav-link-text (see MainLayout's own
+   collapsed-sidebar rules) so it disappears along with the link labels when the pane is collapsed to
+   4rem, and links to the release notes it names - the whole point is telling dev, tester and
+   production apart at a glance, and the next question after "which version" is "what's in it". *@
+<div class="app-version nav-link-text">
+    <a href="/about" title="@($"Released {Services.ReleaseHistory.Current.ReleasedAt:d MMMM yyyy}")">
+        Version @Services.ReleaseHistory.Current.Version
+    </a>
+</div>
+
 @implements IDisposable
 @code {
     [Inject] private Services.ICurrentUserService CurrentUser { get; set; } = default!;
