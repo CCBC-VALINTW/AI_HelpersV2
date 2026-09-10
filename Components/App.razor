@@ -29,7 +29,13 @@
     <link rel="stylesheet" href="@Assets["AiHelpers.styles.css"]" />
     <ImportMap />
     <link rel="icon" type="image/png" href="favicon.png" />
-    <HeadOutlet />
+    @* Must carry the SAME render mode as <Routes> below, and previously didn't - the cause of page
+       titles going stale. A <PageTitle> can only reach a HeadOutlet inside its own render-mode
+       boundary: a static outlet collects whatever the initial prerender produced and then never
+       hears from the interactive circuit again, so the first page loaded set the title and every
+       in-app navigation after that left it untouched (landing on a Helper still showing "Helper
+       Editor"). A full refresh appeared to fix it only because that re-ran the prerender. *@
+    <HeadOutlet @rendermode="InteractiveServer" />
 </head>
 
 <body>

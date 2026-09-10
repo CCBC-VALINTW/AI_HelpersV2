@@ -10,7 +10,9 @@
 @inject IJSRuntime JS
 @inject NavigationManager Nav
 
-<PageTitle>Recent Run</PageTitle>
+@* Names the Helper the run came from, same reasoning as HelperDetail's own title - this page's URL
+   is shareable too, and "Recent Run" told the reader nothing about which run they were looking at. *@
+<PageTitle>@(_entry?.HelperName is { } helperName ? $"{helperName} - AI Helpers" : "Recent run")</PageTitle>
 
 @if (_loading)
 {

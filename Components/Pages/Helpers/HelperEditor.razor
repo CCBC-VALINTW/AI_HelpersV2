@@ -17,7 +17,10 @@
 @inject ISpendStatusService SpendStatus
 @inject NavigationManager Nav
 
-<PageTitle>@(Id is null ? "New Helper" : "Edit Helper")</PageTitle>
+@* Names the Helper being edited, so several editor tabs open at once are tellable apart - falls back
+   to the plain label while a load is still in flight, or if the Helper turned out not to be
+   editable. *@
+<PageTitle>@(Id is null ? "New Helper" : string.IsNullOrWhiteSpace(_name) ? "Edit Helper" : $"Editing {_name.Trim()} - AI Helpers")</PageTitle>
 
 @if (_loading)
 {

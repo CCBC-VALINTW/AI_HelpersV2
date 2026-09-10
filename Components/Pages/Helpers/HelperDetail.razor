@@ -18,7 +18,11 @@
 @inject NavigationManager Nav
 @inject IFeedbackPromptService FeedbackPrompt
 
-<PageTitle>@(_helper?.Name ?? "Helper")</PageTitle>
+@* The Helper's own name leads, so a link shared straight to this page identifies the Helper rather
+   than the tool - deliberately outside the _loading branch below so the title is set on the initial
+   server render too, which is what a link preview or a browser tab reads before the circuit
+   connects. *@
+<PageTitle>@(_helper is null ? "Helper" : $"{_helper.Name} - AI Helpers")</PageTitle>
 
 @if (_loading)
 {
