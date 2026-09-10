@@ -1,3 +1,228 @@
+// Ported from V1's GovService form, which wrote a ClipboardItem carrying BOTH text/html and
+// text/plain (its copyToClip function) - the HTML flavour is the whole point: it's what makes a
+// paste into Word, Outlook or Teams keep the document's headings, tables and stylesheet formatting
+// instead of arriving as unformatted text. Callers pass the same fully-styled document the preview
+// iframe renders, so what lands in the paste matches what was on screen.
+//
+// Returns which flavour actually reached the clipboard rather than a bare true/false: write() with
+// a ClipboardItem needs a secure context and reasonably current browser support (Firefox only
+// gained it in 127), and a silent downgrade to plain text drops every bit of formatting this
+// button exists to preserve - better to say so than let someone find out after pasting.
+export async function copyToClipboard(html, text) {
+    const { html: pasteHtml, converted, failed } = await rasterizeSvgsForClipboard(html);
+
+    if (navigator.clipboard && typeof ClipboardItem !== 'undefined') {
+        try {
+            await navigator.clipboard.write([new ClipboardItem({
+                'text/html': new Blob([pasteHtml], { type: 'text/html' }),
+                'text/plain': new Blob([text], { type: 'text/plain' })
+            })]);
+            return { flavour: 'rich', svgsConverted: converted, svgsFailed: failed };
+        } catch (err) {
+            console.error('Rich clipboard write failed, trying plain text:', err);
+        }
+    }
+
+    try {
+        await navigator.clipboard.writeText(text);
+        return { flavour: 'plain', svgsConverted: 0, svgsFailed: 0 };
+    } catch (err) {
+        console.error('Clipboard write failed:', err);
+        return { flavour: 'failed', svgsConverted: 0, svgsFailed: 0 };
+    }
+}
+
+// Word reads an <img>'s width/height attributes as CSS pixels and lays them out at 96 DPI, so a
+// chart declaring viewBox="0 0 1200 600" arrives 12.5 inches wide. An A4 portrait page with the
+// default 2.54cm margins only has about 6.3 inches of text width, so anything past ~600px overspills
+// the page - which is exactly what happened on real dashboard output. These cap the size the <img>
+// ASKS to be displayed at; the aspect ratio is preserved and a graphic already smaller than the cap
+// is never scaled up.
+const MAX_PASTE_WIDTH_PX = 600;
+const MAX_PASTE_HEIGHT_PX = 900;
+
+// Rasterised at 2x the size it will be DISPLAYED at (not 2x the SVG's own coordinate system) - keeps
+// it crisp when Word scales it for print without paying for pixels no one sees: a 1200-wide chart
+// shown at 600 needs 1200 real pixels, not 2400. Capped per side so an absurd viewBox can't turn
+// into a multi-megabyte base64 string on the clipboard.
+const SVG_RASTER_SCALE = 2;
+const SVG_RASTER_MAX_PX = 2400;
+
+/// Word (and Outlook) simply ignore inline <svg> markup in pasted HTML, so a Helper's charts - which
+/// on real data are almost always inline SVG, no <canvas> or <img> anywhere - vanish from the paste
+/// while all the surrounding text survives. Swapping each one for a PNG <img> before the clipboard
+/// write is what makes them come across.
+///
+/// Runs entirely against an inert DOMParser document, and each SVG is rendered by loading it into an
+/// Image as image/svg+xml - a mode in which browsers refuse to run scripts or fetch external
+/// resources inside the SVG at all. So model-generated markup is never inserted into this app's live
+/// DOM (the thing the sandboxed output iframes exist to prevent) and the canvas never gets tainted.
+///
+/// A failure converting one graphic leaves that graphic's original SVG untouched rather than
+/// abandoning the whole copy - a document that pastes with one chart missing beats one that doesn't
+/// paste at all - and is counted so the caller can say so out loud.
+async function rasterizeSvgsForClipboard(html) {
+    let doc;
+    try {
+        doc = new DOMParser().parseFromString(html, 'text/html');
+    } catch (err) {
+        console.error('Could not parse output for SVG conversion, copying as-is:', err);
+        return { html, converted: 0, failed: 0 };
+    }
+
+    // Only outermost SVGs - a nested one is rasterised as part of its parent, and replacing the
+    // parent first would leave the inner node detached anyway.
+    const svgs = [...doc.querySelectorAll('svg')].filter(svg => !svg.parentElement?.closest('svg'));
+    if (svgs.length === 0) {
+        return { html, converted: 0, failed: 0 };
+    }
+
+    // On screen the SVG sits inside .rendDoc and the selected stylesheet applies to it. Loaded as a
+    // standalone image it inherits nothing from this document, so any styling the stylesheet was
+    // providing (text colour, fonts, stroke widths) would silently disappear from the raster. Both
+    // halves of the fix live in rasterizeSvgElement: the document's own <style> blocks get copied
+    // into the SVG, and the SVG root is given the .rendDoc class so descendant selectors still match.
+    const documentCss = [...doc.querySelectorAll('style')].map(s => s.textContent).join('\n');
+
+    let converted = 0;
+    let failed = 0;
+
+    for (const svg of svgs) {
+        try {
+            svg.replaceWith(await rasterizeSvgElement(svg, documentCss, doc));
+            converted++;
+        } catch (err) {
+            console.error('Could not convert an SVG to an image, leaving it as-is:', err);
+            failed++;
+        }
+    }
+
+    const doctype = doc.doctype ? '<!DOCTYPE html>' : '';
+    return { html: doctype + doc.documentElement.outerHTML, converted, failed };
+}
+
+async function rasterizeSvgElement(svg, documentCss, doc) {
+    const intrinsic = svgPixelSize(svg);
+    const display = fitWithinPastePage(intrinsic);
+
+    const rasterScale = Math.min(SVG_RASTER_SCALE, SVG_RASTER_MAX_PX / Math.max(display.width, display.height));
+    const pixelWidth = Math.max(1, Math.round(display.width * rasterScale));
+    const pixelHeight = Math.max(1, Math.round(display.height * rasterScale));
+
+    const clone = svg.cloneNode(true);
+    // Serialised standalone, so it needs the namespace and a real intrinsic size in its own right -
+    // an SVG sized only by CSS (width: 100%) has neither once it's a separate image, and would
+    // rasterise at the browser's default 300x150 replaced-element size instead.
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    // A viewBox is what maps the drawing's own coordinates onto whatever width/height it's given, so
+    // setting the size below scales the CONTENT. Without one, changing width/height just changes how
+    // much of the canvas is visible - the drawing would be cropped or padded instead of scaled - so
+    // one is synthesised from the intrinsic size for the SVGs that don't declare it.
+    if (!clone.getAttribute('viewBox')) {
+        clone.setAttribute('viewBox', `0 0 ${intrinsic.width} ${intrinsic.height}`);
+    }
+    // Sized to the final pixel dimensions so the vector is rendered natively at that resolution,
+    // rather than rasterised small and then stretched by drawImage.
+    clone.setAttribute('width', String(pixelWidth));
+    clone.setAttribute('height', String(pixelHeight));
+    if (documentCss.trim()) {
+        clone.classList.add('rendDoc');
+        const style = doc.createElementNS('http://www.w3.org/2000/svg', 'style');
+        style.textContent = documentCss;
+        clone.insertBefore(style, clone.firstChild);
+    }
+
+    const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(clone)], { type: 'image/svg+xml' }));
+    try {
+        const image = await loadImage(url);
+        const canvas = document.createElement('canvas');
+        canvas.width = pixelWidth;
+        canvas.height = pixelHeight;
+
+        const ctx = canvas.getContext('2d');
+        // An SVG has no background of its own. Left transparent, a chart's dark text and axes land on
+        // whatever colour the paste target happens to composite onto - black-on-dark in a themed Word
+        // document. The preview shows it against the document's white page, so match that.
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(image, 0, 0);
+
+        const img = doc.createElement('img');
+        img.setAttribute('src', canvas.toDataURL('image/png'));
+        img.setAttribute('width', String(display.width));
+        img.setAttribute('height', String(display.height));
+        // Word sizes from the attributes above and ignores this, but a paste into anything that does
+        // respect CSS (a web editor, a mail client, Teams) then can't overflow a narrower column
+        // either. The pair is deliberate - max-width alone would squash the aspect ratio.
+        img.setAttribute('style', 'max-width:100%;height:auto');
+        img.setAttribute('alt', svgAltText(svg));
+        return img;
+    } finally {
+        URL.revokeObjectURL(url);
+    }
+}
+
+/// Shrinks a graphic to fit the text area of an A4 portrait page, preserving its aspect ratio.
+/// Deliberately one shared scale factor for both dimensions rather than clamping each independently,
+/// which would distort anything wider or taller than the caps - and floored at 1 so a small chart is
+/// left exactly as it is rather than being blown up to fill the width.
+function fitWithinPastePage({ width, height }) {
+    const fit = Math.min(1, MAX_PASTE_WIDTH_PX / width, MAX_PASTE_HEIGHT_PX / height);
+    return {
+        width: Math.max(1, Math.round(width * fit)),
+        height: Math.max(1, Math.round(height * fit))
+    };
+}
+
+function loadImage(url) {
+    return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error('the SVG could not be loaded as an image'));
+        image.src = url;
+    });
+}
+
+/// Size has to come from the SVG's own attributes: the parsed document is never rendered, so
+/// getBoundingClientRect would report zero for everything. viewBox is the most reliable source for
+/// model-generated markup (width/height are often percentages, or absent entirely), and carries the
+/// aspect ratio needed when only one of the two dimensions is given.
+function svgPixelSize(svg) {
+    const absolute = value => {
+        if (!value || value.trim().endsWith('%')) return null;
+        const parsed = parseFloat(value);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    };
+
+    let width = absolute(svg.getAttribute('width'));
+    let height = absolute(svg.getAttribute('height'));
+
+    const viewBox = (svg.getAttribute('viewBox') || '').split(/[\s,]+/).map(parseFloat).filter(Number.isFinite);
+    if (viewBox.length === 4 && viewBox[2] > 0 && viewBox[3] > 0) {
+        const [, , boxWidth, boxHeight] = viewBox;
+        if (!width && !height) {
+            width = boxWidth;
+            height = boxHeight;
+        } else if (!width) {
+            width = height * (boxWidth / boxHeight);
+        } else if (!height) {
+            height = width * (boxHeight / boxWidth);
+        }
+    }
+
+    return {
+        width: Math.max(1, Math.round(width || 800)),
+        height: Math.max(1, Math.round(height || 450))
+    };
+}
+
+/// Keeps whatever accessible name the SVG already carried - a rasterised chart is opaque to a screen
+/// reader, so dropping its <title> would make the pasted document less accessible than the original.
+function svgAltText(svg) {
+    const title = svg.querySelector('title');
+    return (svg.getAttribute('aria-label') || (title ? title.textContent : '') || '').trim();
+}
+
 // "Open in new tab" for Helper output that contains its own <script> (e.g. interactive
 // dashboards). Uses window.open('', '_blank') + writing content in, not a data: URL navigation -
 // confirmed in testing that modern browsers block top-level navigation to data: URLs even from a

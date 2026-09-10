@@ -35,6 +35,7 @@ else
             <button type="button" class="btn btn-primary btn-sm" @onclick="SaveAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_title))">
                 @(_busy ? "Saving…" : "Save")
             </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="CopyToClipboardAsync" disabled="@_busy">Copy to clipboard</button>
             @if (_statusMessage is not null)
             {
                 <span class="text-muted small">@_statusMessage</span>
@@ -94,6 +95,7 @@ else
     private bool _editorNeedsInit;
     private ElementReference _editorRef;
     private IJSObjectReference? _module;
+    private IJSObjectReference? _actionsModule;
     private List<Data.Entities.Stylesheet> _stylesheets = [];
     private int? _selectedStylesheetId;
 
@@ -221,6 +223,29 @@ else
         await module.InvokeVoidAsync("printDocument", EditorId);
     }
 
+    /// <summary>
+    /// V1's "Copy to Clipboard - Rich" button, replicated here as well as on the run page - takes
+    /// the live preview's current content, wraps it with the selected stylesheet exactly as the
+    /// HTML export does, and puts that on the clipboard as its HTML flavour so a paste into Word or
+    /// Outlook keeps the formatting (see outputActions.js's copyToClipboard).
+    /// <para>
+    /// Deliberately does NOT save first, unlike every export button above: getHtml reads the live
+    /// editor, so the copy already includes unsaved edits, and committing a database write as a
+    /// side effect of "copy" would be a surprise. The export buttons only save because a server
+    /// round trip genuinely can't see the browser's unsaved state.
+    /// </para>
+    /// </summary>
+    private async Task CopyToClipboardAsync()
+    {
+        var module = await GetModuleAsync();
+        var html = OutputDocumentBuilder.Build(await module.InvokeAsync<string>("getHtml", EditorId), GetSelectedCss());
+
+        _actionsModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "/js/outputActions.js");
+        var result = await _actionsModule.InvokeAsync<ClipboardCopyResult>("copyToClipboard", html, HtmlToPlainText.Convert(html));
+
+        _statusMessage = result.Describe();
+    }
+
     private async Task<IJSObjectReference> GetModuleAsync() =>
         _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "/js/structuredEditor.js");
 
@@ -239,6 +264,18 @@ else
                 // ExportAsync forceLoad navigation doesn't reach this: a Content-Disposition:
                 // attachment response triggers a download without the browser unloading the
                 // current page, so the circuit survives it.
+            }
+        }
+
+        if (_actionsModule is not null)
+        {
+            try
+            {
+                await _actionsModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Same as above.
             }
         }
     }

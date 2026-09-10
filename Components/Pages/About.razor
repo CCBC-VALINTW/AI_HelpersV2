@@ -60,6 +60,11 @@
 
     private static readonly List<ReleaseNote> Releases =
     [
+        new("1.17", new DateTime(2026, 9, 10, 10, 0, 0),
+        [
+            "Brought back V1's \"Copy to clipboard\" button, on both a Helper's result and the document editor - it copies the document with its formatting, so pasting into Word, Outlook or Teams keeps the headings, tables and styling instead of arriving as plain text. Copying from the document editor takes whatever is currently on screen, including edits you haven't saved yet.",
+            "Charts and other graphics in a Helper's output are now converted to pictures as part of that copy, so they come across into Word too - previously they were dropped from the paste entirely, because Word ignores the kind of drawing instructions Helpers produce. They're also scaled to fit within an A4 page's margins rather than arriving oversized and spilling off the edge, and a graphic already smaller than that is left at its own size. Anything a chart's own script draws after the page loads still can't be copied this way; use the PDF export for those."
+        ]),
         new("1.16", new DateTime(2026, 9, 9, 11, 0, 0),
         [
             "The development environment now visibly marks itself as such - the left-hand navigation pane turns red with a notice explaining it's the active development environment and may be unstable, with a link across to the production site. Never shown outside development."

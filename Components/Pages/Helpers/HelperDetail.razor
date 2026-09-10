@@ -377,11 +377,16 @@ else
                                     </select>
                                 </div>
                                 <div class="d-flex align-items-center gap-2">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="CopyToClipboard">Copy to clipboard</button>
                                     <a class="btn btn-outline-secondary btn-sm" href="@BuildOutputDataUri()" download="@(FileNameSanitizer.Sanitize(_suggestedFileName ?? _helper.Name, fallback: "helper-output") + ".html")">Download as HTML</a>
                                     <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="OpenInNewTab">Open in new tab</button>
                                     <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="StartEditing">Edit the result</button>
                                 </div>
                             </div>
+                            @if (_copyStatus is not null)
+                            {
+                                <p class="text-muted small mb-2">@_copyStatus</p>
+                            }
                             <iframe class="border rounded helper-output" srcdoc="@BuildOutputDocument(_output, GetSelectedCss())" sandbox=""></iframe>
                         }
                     </div>
@@ -482,6 +487,9 @@ else
     private decimal _cap;
     private string? _output;
     private string? _suggestedFileName;
+    // Cleared whenever the output it referred to changes (a run, a refine, "Start a new run") -
+    // "Copied" left sitting under a result the user has since regenerated would be a lie.
+    private string? _copyStatus;
     private List<Data.Entities.Stylesheet> _stylesheets = [];
     private int? _selectedStylesheetId;
     private bool _editing;
@@ -878,6 +886,7 @@ else
     {
         _output = null;
         _suggestedFileName = null;
+        _copyStatus = null;
         _errorMessage = null;
         _budgetExceeded = false;
         _lastInput = "";
@@ -940,6 +949,7 @@ else
         _running = true;
         _runStartedAt = DateTime.UtcNow;
         _errorMessage = null;
+        _copyStatus = null;
         _budgetExceeded = false;
         RotateWaitingContent();
         StateHasChanged();
@@ -1466,6 +1476,7 @@ else
         // Defense in depth: TipTap constrains structure to its own schema, but re-sanitize before
         // this becomes the new source-of-truth output that flows into BuildOutputDocument anyway.
         _output = HtmlContentSanitizer.Sanitize(html);
+        _copyStatus = null;
         _editing = false;
     }
 
@@ -1477,6 +1488,25 @@ else
         if (_output is null) return;
         _actionsModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "/js/outputActions.js");
         await _actionsModule.InvokeVoidAsync("openInNewTab", BuildOutputDocument(_output, GetSelectedCss()));
+    }
+
+    /// <summary>
+    /// Copies the result with its formatting intact - V1's "Copy to Clipboard - Rich" button,
+    /// replicated. Copies exactly the document the preview iframe is showing (the same
+    /// OutputDocumentBuilder output "Download as HTML" saves, currently-selected stylesheet
+    /// included) as the clipboard's HTML flavour, so pasting into Word or Outlook keeps the
+    /// headings/tables/styling rather than arriving as unformatted text - see
+    /// outputActions.js's copyToClipboard for the two-flavour ClipboardItem this relies on.
+    /// </summary>
+    private async Task CopyToClipboard()
+    {
+        if (_output is null) return;
+
+        var html = BuildOutputDocument(_output, GetSelectedCss());
+        _actionsModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "/js/outputActions.js");
+        var result = await _actionsModule.InvokeAsync<ClipboardCopyResult>("copyToClipboard", html, HtmlToPlainText.Convert(html));
+
+        _copyStatus = result.Describe();
     }
 
     public async ValueTask DisposeAsync()
