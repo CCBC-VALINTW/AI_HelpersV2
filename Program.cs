@@ -213,42 +213,65 @@ app.MapControllers().AllowAnonymous();
 // circuit outlives the original HTTP request, but this endpoint IS a plain, single HTTP request
 // (a real browser navigation, not SignalR/circuit traffic), so HttpContext.User already reflects
 // the signed-in user directly - see ICurrentUserService's own doc comment for that distinction.
-app.MapGet("/documents/{id:int}/export/{format}", async (
-    int id,
-    string format,
-    AppDbContext db,
-    IDocumentExportService exportService,
-    HttpContext http) =>
+// Shared by both export routes below so the ownership rule can't drift between them: same
+// "not found" response whether the document doesn't exist or belongs to someone else - documents are
+// private to whoever sent them to the editor (no sharing/admin-override in this first pass, see the
+// project's build report), so this deliberately doesn't distinguish the two cases to a caller
+// probing IDs.
+static async Task<AiHelpers.Data.Entities.GeneratedDocument?> LoadOwnDocumentAsync(int id, AppDbContext db, HttpContext http)
 {
     var email = http.User.FindFirstValue(ClaimTypes.Email)
         ?? http.User.FindFirstValue("preferred_username")
         ?? http.User.FindFirstValue(ClaimTypes.Upn);
+    if (email is null) return null;
 
     var document = await db.GeneratedDocuments.Include(d => d.Stylesheet).FirstOrDefaultAsync(d => d.Id == id);
+    return document is not null && string.Equals(document.CreatedByEmail, email, StringComparison.OrdinalIgnoreCase)
+        ? document
+        : null;
+}
 
-    // Same "not found" response whether the document doesn't exist or belongs to someone else -
-    // documents are private to whoever sent them to the editor (no sharing/admin-override in this
-    // first pass, see the project's build report), so this deliberately doesn't distinguish the
-    // two cases to a caller probing IDs.
-    if (document is null || email is null || !string.Equals(document.CreatedByEmail, email, StringComparison.OrdinalIgnoreCase))
-    {
-        return Results.NotFound();
-    }
+app.MapGet("/documents/{id:int}/export/html", async (int id, AppDbContext db, IDocumentExportService exportService, HttpContext http) =>
+{
+    var document = await LoadOwnDocumentAsync(id, db, http);
+    if (document is null) return Results.NotFound();
 
-    var fileName = FileNameSanitizer.Sanitize(document.Title);
+    // Reads the saved content, unlike docx below - an .html file keeps inline SVG happily (browsers
+    // render it), so there's nothing the browser needs to prepare first.
+    return Results.File(
+        exportService.ToHtml(document.Title, document.HtmlContent, document.Stylesheet?.Css),
+        "text/html",
+        $"{FileNameSanitizer.Sanitize(document.Title)}.html");
+});
 
-    return format switch
-    {
-        "docx" => Results.File(
-            exportService.ToDocx(document.Title, document.HtmlContent, document.Stylesheet?.Css),
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            $"{fileName}.docx"),
-        "html" => Results.File(
-            exportService.ToHtml(document.Title, document.HtmlContent, document.Stylesheet?.Css),
-            "text/html",
-            $"{fileName}.html"),
-        _ => Results.BadRequest("Unsupported export format - expected docx or html."),
-    };
+// POST, not GET, and it takes the HTML in the body rather than reading the saved copy - because the
+// markup has to be rasterised in the browser before conversion (Word can't render inline SVG, and
+// there's no canvas server-side to turn one into a PNG). See DocumentEditor.razor's ExportDocxAsync
+// and outputActions.js's rasterizeSvgs. That also means this always converts exactly what the editor
+// is showing, unsaved edits included, rather than whatever last reached the database.
+//
+// Taking HTML from the caller adds no new exposure: it's the caller's own document content, it is
+// never persisted from here, and nothing in the pipeline fetches a remote resource out of it (see
+// HtmlBlockParser.ReadDataUriImage on why a non-data-URI image is skipped rather than downloaded).
+app.MapPost("/documents/{id:int}/export/docx", async (
+    int id,
+    DocxExportRequest request,
+    AppDbContext db,
+    IDocumentExportService exportService,
+    HttpContext http) =>
+{
+    var document = await LoadOwnDocumentAsync(id, db, http);
+    if (document is null) return Results.NotFound();
+
+    return Results.File(
+        exportService.ToDocx(document.Title, request.Html ?? document.HtmlContent, document.Stylesheet?.Css),
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        $"{FileNameSanitizer.Sanitize(document.Title)}.docx");
 });
 
 app.Run();
+
+/// <summary>Body of the docx export POST - the editor's current, SVG-rasterised HTML. Null falls
+/// back to the saved content, so the export still produces something if the browser-side
+/// preparation didn't run.</summary>
+internal sealed record DocxExportRequest(string? Html);

@@ -2,6 +2,11 @@ using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using Color = DocumentFormat.OpenXml.Wordprocessing.Color;
+// The picture markup pulls three DrawingML namespaces whose type names collide with each other and
+// with Wordprocessing's - aliased the way the Open XML SDK's own samples do.
+using A = DocumentFormat.OpenXml.Drawing;
+using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
+using PIC = DocumentFormat.OpenXml.Drawing.Pictures;
 
 namespace AiHelpers.Services.DocumentExport;
 
@@ -112,8 +117,112 @@ internal static class DocxRenderer
             case TableBlock t:
                 body.AppendChild(BuildTable(mainPart, t, tagStyles));
                 break;
+            case ImageBlock i:
+                body.AppendChild(BuildImageParagraph(mainPart, i));
+                break;
         }
     }
+
+    // 1 pixel at 96 DPI = 9525 EMU (914400 EMU per inch / 96).
+    private const long EmuPerPixel = 9525L;
+
+    // A4 width less the 2cm margins set in Render, in EMU (1 twip = 635 EMU) - an image wider than
+    // this would run into the margin or off the page entirely.
+    private const long UsableWidthEmu = (11906L - 1134L - 1134L) * 635L;
+
+    /// <summary>
+    /// Embeds a raster image as its own centred paragraph.
+    /// <para>
+    /// The XML shape here is prescribed by the DrawingML schema rather than chosen - a wp:inline
+    /// carrying extent/docPr/graphic, wrapping a pic:pic of nvPicPr/blipFill/spPr, where the blip
+    /// references the image part by relationship id. Element order within each is not a stylistic
+    /// choice; getting it wrong produces a file Word refuses to open rather than a compile error,
+    /// which is why the exporter's own tests run OpenXmlValidator over the result (the same way the
+    /// table markup's ordering bugs were caught while that was written).
+    /// </para>
+    /// </summary>
+    private static Paragraph BuildImageParagraph(MainDocumentPart mainPart, ImageBlock image)
+    {
+        var imagePart = mainPart.AddImagePart(ImagePartTypeFor(image.ContentType));
+        using (var bytes = new MemoryStream(image.Bytes))
+        {
+            imagePart.FeedData(bytes);
+        }
+
+        var (widthEmu, heightEmu) = FitToPage(image.WidthPx, image.HeightPx);
+
+        // Unique per image within the document, and must not be 0 - Word treats a duplicate or zero
+        // docPr id as a corrupt drawing. Counting the parts already added gives a stable sequence
+        // without threading a counter through every call.
+        var drawingId = (uint)mainPart.ImageParts.Count();
+
+        var drawing = new Drawing(
+            new DW.Inline(
+                new DW.Extent { Cx = widthEmu, Cy = heightEmu },
+                new DW.EffectExtent { LeftEdge = 0L, TopEdge = 0L, RightEdge = 0L, BottomEdge = 0L },
+                new DW.DocProperties
+                {
+                    Id = drawingId,
+                    Name = $"Picture {drawingId}",
+                    // Carries the alt text the rasteriser copied off the SVG's <title>, so the
+                    // chart isn't invisible to a screen reader once it's a flat picture.
+                    Description = image.AltText ?? string.Empty
+                },
+                new DW.NonVisualGraphicFrameDrawingProperties(
+                    new A.GraphicFrameLocks { NoChangeAspect = true }),
+                new A.Graphic(
+                    new A.GraphicData(
+                        new PIC.Picture(
+                            new PIC.NonVisualPictureProperties(
+                                new PIC.NonVisualDrawingProperties { Id = 0U, Name = $"image{drawingId}" },
+                                new PIC.NonVisualPictureDrawingProperties()),
+                            new PIC.BlipFill(
+                                new A.Blip { Embed = mainPart.GetIdOfPart(imagePart) },
+                                new A.Stretch(new A.FillRectangle())),
+                            new PIC.ShapeProperties(
+                                new A.Transform2D(
+                                    new A.Offset { X = 0L, Y = 0L },
+                                    new A.Extents { Cx = widthEmu, Cy = heightEmu }),
+                                new A.PresetGeometry(new A.AdjustValueList()) { Preset = A.ShapeTypeValues.Rectangle })))
+                    { Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" }))
+            {
+                DistanceFromTop = 0U,
+                DistanceFromBottom = 0U,
+                DistanceFromLeft = 0U,
+                DistanceFromRight = 0U
+            });
+
+        // Assigned as typed properties, not constructor arguments: CT_PPr fixes its child order
+        // (spacing before jc), and the SDK's property setters place each element correctly while
+        // constructor arguments append in the order written - which OpenXmlValidator rejected as
+        // "unexpected child element 'spacing'" when this was first written the other way round.
+        var properties = new ParagraphProperties
+        {
+            SpacingBetweenLines = new SpacingBetweenLines { Before = "120", After = "160" },
+            Justification = new Justification { Val = JustificationValues.Center }
+        };
+
+        return new Paragraph(properties, new Run(drawing));
+    }
+
+    /// <summary>Scales an image down to fit the page's text width, preserving aspect ratio; an image
+    /// already narrower than the page is left alone rather than stretched up to fill it.</summary>
+    private static (long WidthEmu, long HeightEmu) FitToPage(int widthPx, int heightPx)
+    {
+        var widthEmu = widthPx * EmuPerPixel;
+        var heightEmu = heightPx * EmuPerPixel;
+        if (widthEmu <= UsableWidthEmu) return (widthEmu, heightEmu);
+
+        return (UsableWidthEmu, (long)(heightEmu * (UsableWidthEmu / (double)widthEmu)));
+    }
+
+    private static PartTypeInfo ImagePartTypeFor(string contentType) => contentType.ToLowerInvariant() switch
+    {
+        "image/jpeg" or "image/jpg" => ImagePartType.Jpeg,
+        "image/gif" => ImagePartType.Gif,
+        "image/bmp" => ImagePartType.Bmp,
+        _ => ImagePartType.Png,
+    };
 
     private static Paragraph BuildRuleParagraph() => new(new ParagraphProperties(
         new ParagraphBorders(new BottomBorder { Val = BorderValues.Single, Size = 6, Color = "999999" }),

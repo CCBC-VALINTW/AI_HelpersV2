@@ -101,6 +101,19 @@ internal static partial class HtmlBlockParser
             case "br":
                 return; // handled inline within ExtractRuns, not reached as a direct block child in practice
 
+            case "img":
+                if (ReadDataUriImage(el) is { } image) blocks.Add(image);
+                return;
+
+            case "svg":
+                // Reached only when the browser-side rasterisation didn't run or couldn't convert
+                // this one (see outputActions.js's rasterizeSvgsForClipboard, which leaves a failed
+                // graphic's original SVG in place). Dropped rather than allowed to fall through to
+                // the default branch, which would scrape the chart's <text> labels out as a run of
+                // loose paragraphs - axis numbers and legend words stranded in the document with no
+                // chart around them, which reads worse than the graphic simply being absent.
+                return;
+
             case "style" or "script" or "head" or "title" or "meta" or "link":
                 // Never exportable content - without this, the default branch below extracts a
                 // <style>/<script> element's raw text (CSS/JS source) as if it were a plain
@@ -251,6 +264,54 @@ internal static partial class HtmlBlockParser
             }
         }
     }
+
+    /// <summary>
+    /// Reads an &lt;img&gt; whose src is a base64 data URI into an ImageBlock.
+    /// <para>
+    /// A remote (http/https/file) src is deliberately NOT fetched. Doing so would mean this export
+    /// endpoint issuing arbitrary outbound requests on a caller's behalf against a URL embedded in
+    /// model-generated content - the SSRF surface that IUrlFetchService exists to guard for the
+    /// URL-as-input feature, and the reason docx image support was originally left out rather than
+    /// half-built. Data URIs need none of that: the bytes are already inline, no request happens,
+    /// and they're the only kind this app actually produces (real output data has no remote images
+    /// at all). An image that isn't a data URI is skipped rather than fetched.
+    /// </para>
+    /// </summary>
+    private static ImageBlock? ReadDataUriImage(IElement el)
+    {
+        var match = DataUriPattern().Match(el.GetAttribute("src") ?? "");
+        if (!match.Success) return null;
+
+        byte[] bytes;
+        try
+        {
+            bytes = Convert.FromBase64String(match.Groups["data"].Value);
+        }
+        catch (FormatException)
+        {
+            return null; // Truncated or otherwise malformed base64 - skip the image, keep the document.
+        }
+        if (bytes.Length == 0) return null;
+
+        // Width/height come from the attributes the rasteriser sets. Falling back to a sensible box
+        // rather than guessing at the real pixel dimensions (which would mean decoding the image
+        // here) - an unsized image is not something this app's own pipeline produces.
+        var width = ReadPixelAttribute(el, "width") ?? 600;
+        var height = ReadPixelAttribute(el, "height") ?? 400;
+
+        var alt = el.GetAttribute("alt");
+        return new ImageBlock(bytes, $"image/{match.Groups["subtype"].Value.ToLowerInvariant()}", width, height,
+            string.IsNullOrWhiteSpace(alt) ? null : alt);
+    }
+
+    private static int? ReadPixelAttribute(IElement el, string name) =>
+        int.TryParse(el.GetAttribute(name), out var value) && value > 0 ? value : null;
+
+    /// <summary>Only the raster formats Word can embed directly - an SVG data URI deliberately
+    /// doesn't match, since embedding one would need a raster fallback generated alongside it.</summary>
+    [GeneratedRegex(@"^data:image/(?<subtype>png|jpeg|jpg|gif|bmp);base64,(?<data>[A-Za-z0-9+/=\s]+)$",
+        RegexOptions.IgnoreCase)]
+    private static partial Regex DataUriPattern();
 
     private static (byte, byte, byte)? ReadColor(IElement el)
     {

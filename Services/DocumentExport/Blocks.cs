@@ -46,6 +46,20 @@ internal sealed record TableBlock(IReadOnlyList<TableRowBlock> Rows) : Block;
 
 internal sealed record RuleBlock : Block;
 
+/// <summary>
+/// A raster image to embed in the export. Only ever produced from a data-URI &lt;img&gt; - see
+/// HtmlBlockParser's own "img" case for why a remote src is deliberately never fetched.
+/// <para>
+/// In practice these are Helper charts. The model emits those as inline SVG, which Word cannot
+/// render from converted HTML, so wwwroot/js/outputActions.js rasterises each one to a PNG data URI
+/// in the browser before the HTML reaches this pipeline - there's no canvas server-side to do it
+/// with. WidthPx/HeightPx are the size the image asks to be displayed at, already page-fitted by
+/// that rasterisation; DocxRenderer clamps against the real page width again regardless, since
+/// nothing guarantees an image arrived through that path.
+/// </para>
+/// </summary>
+internal sealed record ImageBlock(byte[] Bytes, string ContentType, int WidthPx, int HeightPx, string? AltText) : Block;
+
 /// <summary>A user-inserted page break (the pagebreak plugin's toolbar button) - see
 /// DocumentEditor.razor's pagebreak_separator config for why this is recognised from a styled div
 /// rather than the plugin's own default HTML-comment marker.</summary>

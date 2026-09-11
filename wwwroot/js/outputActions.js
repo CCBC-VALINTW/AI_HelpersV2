@@ -9,7 +9,7 @@
 // gained it in 127), and a silent downgrade to plain text drops every bit of formatting this
 // button exists to preserve - better to say so than let someone find out after pasting.
 export async function copyToClipboard(html, text) {
-    const { html: pasteHtml, converted, failed } = await rasterizeSvgsForClipboard(html);
+    const { html: pasteHtml, converted, failed } = await rasterizeSvgs(html);
 
     if (navigator.clipboard && typeof ClipboardItem !== 'undefined') {
         try {
@@ -48,10 +48,11 @@ const MAX_PASTE_HEIGHT_PX = 900;
 const SVG_RASTER_SCALE = 2;
 const SVG_RASTER_MAX_PX = 2400;
 
-/// Word (and Outlook) simply ignore inline <svg> markup in pasted HTML, so a Helper's charts - which
-/// on real data are almost always inline SVG, no <canvas> or <img> anywhere - vanish from the paste
-/// while all the surrounding text survives. Swapping each one for a PNG <img> before the clipboard
-/// write is what makes them come across.
+/// Word (and Outlook) simply ignore inline <svg> markup, whether it arrives via a paste or via the
+/// docx converter - so a Helper's charts, which on real data are almost always inline SVG with no
+/// <canvas> or <img> anywhere, vanish while all the surrounding text survives. Swapping each one for
+/// a PNG <img> first is what makes them come across. Used by the clipboard copy and by the Word
+/// export, which has to rasterise here in the browser because there's no canvas server-side.
 ///
 /// Runs entirely against an inert DOMParser document, and each SVG is rendered by loading it into an
 /// Image as image/svg+xml - a mode in which browsers refuse to run scripts or fetch external
@@ -59,14 +60,19 @@ const SVG_RASTER_MAX_PX = 2400;
 /// DOM (the thing the sandboxed output iframes exist to prevent) and the canvas never gets tainted.
 ///
 /// A failure converting one graphic leaves that graphic's original SVG untouched rather than
-/// abandoning the whole copy - a document that pastes with one chart missing beats one that doesn't
-/// paste at all - and is counted so the caller can say so out loud.
-async function rasterizeSvgsForClipboard(html) {
+/// abandoning the whole operation - a document that arrives with one chart missing beats one that
+/// doesn't arrive at all - and is counted so the caller can say so out loud.
+///
+/// extraCss carries styling the markup itself doesn't include: the clipboard passes a whole styled
+/// document whose own <style> blocks are found below, but the export passes a bare body fragment
+/// with its stylesheet held separately, and without it a chart whose colours come from the
+/// stylesheet would rasterise unstyled.
+export async function rasterizeSvgs(html, extraCss = '') {
     let doc;
     try {
         doc = new DOMParser().parseFromString(html, 'text/html');
     } catch (err) {
-        console.error('Could not parse output for SVG conversion, copying as-is:', err);
+        console.error('Could not parse output for SVG conversion, using it as-is:', err);
         return { html, converted: 0, failed: 0 };
     }
 
@@ -82,7 +88,7 @@ async function rasterizeSvgsForClipboard(html) {
     // providing (text colour, fonts, stroke widths) would silently disappear from the raster. Both
     // halves of the fix live in rasterizeSvgElement: the document's own <style> blocks get copied
     // into the SVG, and the SVG root is given the .rendDoc class so descendant selectors still match.
-    const documentCss = [...doc.querySelectorAll('style')].map(s => s.textContent).join('\n');
+    const documentCss = [...doc.querySelectorAll('style')].map(s => s.textContent).concat(extraCss).join('\n');
 
     let converted = 0;
     let failed = 0;
@@ -97,8 +103,47 @@ async function rasterizeSvgsForClipboard(html) {
         }
     }
 
-    const doctype = doc.doctype ? '<!DOCTYPE html>' : '';
-    return { html: doctype + doc.documentElement.outerHTML, converted, failed };
+    // Hands back the same shape it was given: a whole document stays a whole document (the
+    // clipboard's HTML flavour needs its <head> and <style>), while a body fragment comes back as a
+    // fragment - the export pipeline re-wraps what it receives, and returning <html><body> markup
+    // there would nest one document inside another.
+    if (/^\s*<(!doctype|html)[\s>]/i.test(html)) {
+        return { html: (doc.doctype ? '<!DOCTYPE html>' : '') + doc.documentElement.outerHTML, converted, failed };
+    }
+    return { html: doc.body.innerHTML, converted, failed };
+}
+
+/// POSTs HTML to a server export endpoint and saves whatever file comes back.
+///
+/// The Word export can't be a plain link or navigation like the HTML one: the markup being converted
+/// has to be rasterised in the browser first (see rasterizeSvgs), so it has to travel in a request
+/// body rather than being read from the database server-side. Downloads via a blob URL and a
+/// synthetic click, which is how a fetch response becomes a saved file.
+export async function postHtmlForDownload(url, html, fileName) {
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ html })
+    });
+
+    if (!response.ok) {
+        console.error('Export request failed:', response.status, await response.text().catch(() => ''));
+        return false;
+    }
+
+    const objectUrl = URL.createObjectURL(await response.blob());
+    try {
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        return true;
+    } finally {
+        // Deferred - revoking synchronously can cancel the download the click just started.
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 30000);
+    }
 }
 
 async function rasterizeSvgElement(svg, documentCss, doc) {

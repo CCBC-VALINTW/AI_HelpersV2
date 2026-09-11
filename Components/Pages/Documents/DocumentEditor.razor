@@ -53,9 +53,9 @@ else
         </div>
         <div class="d-flex align-items-center gap-2">
             <span class="text-muted small me-1">Export:</span>
-            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => ExportAsync(ExportFormat.Docx)" disabled="@_busy">Word (.docx)</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="ExportDocxAsync" disabled="@_busy">Word (.docx)</button>
             <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="PrintAsync" disabled="@_busy">PDF</button>
-            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => ExportAsync(ExportFormat.Html)" disabled="@_busy">HTML</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="ExportHtmlAsync" disabled="@_busy">HTML</button>
         </div>
     </div>
 
@@ -81,10 +81,10 @@ else
     // matter anyway since each page is its own circuit/component instance.
     private const string EditorId = "document";
 
-    // Pdf deliberately isn't a member here any more - PDF export no longer goes through this
-    // server-round-trip export path at all (see PrintAsync), so there is nothing left to switch on
-    // for it.
-    private enum ExportFormat { Docx, Html }
+    // There's no shared export-format enum any more: all three exports now take genuinely different
+    // routes - HTML navigates to a GET, Word POSTs browser-rasterised markup (see ExportDocxAsync),
+    // and PDF never leaves the client at all (see PrintAsync) - so there was nothing left to switch
+    // on.
 
     private bool _loading = true;
     private Data.Entities.GeneratedDocument? _document;
@@ -184,30 +184,75 @@ else
         }
     }
 
-    /// <summary>Always saves first so the download always reflects what's currently in the editor,
-    /// not whatever was last explicitly saved - the export endpoint (Program.cs) reads the
-    /// persisted record, it has no access to this circuit's live preview/edit-panel state.</summary>
-    private async Task ExportAsync(ExportFormat format)
+    /// <summary>HTML export. Saves first so the download reflects what's currently in the editor,
+    /// not whatever was last explicitly saved - this endpoint reads the persisted record, it has no
+    /// access to this circuit's live preview/edit-panel state.
+    /// <para>
+    /// A real browser navigation (not a SignalR/JS-interop call) so the server can respond with
+    /// Content-Disposition: attachment and actual bytes - see Program.cs's export endpoint doc
+    /// comment for why this isn't a data: URI download link like HelperDetail's own. The browser
+    /// downloads the file without leaving this page (an attachment response doesn't unload the
+    /// current document), so the circuit survives this untouched.
+    /// </para>
+    /// </summary>
+    private async Task ExportHtmlAsync()
     {
         await SaveAsync();
         if (_document is null) return;
 
-        var formatSegment = format switch
-        {
-            ExportFormat.Docx => "docx",
-            _ => "html",
-        };
-
-        // A real browser navigation (not a SignalR/JS-interop call) so the server can respond with
-        // Content-Disposition: attachment and actual binary bytes - see Program.cs's export
-        // endpoint doc comment for why this isn't a data: URI download link like HelperDetail's
-        // HTML-only one. The browser downloads the file without leaving this page (an attachment
-        // response doesn't unload the current document), so the circuit survives this untouched.
-        Nav.NavigateTo($"/documents/{_document.Id}/export/{formatSegment}", forceLoad: true);
+        Nav.NavigateTo($"/documents/{_document.Id}/export/html", forceLoad: true);
     }
 
-    /// <summary>PDF's export button - unlike ExportAsync's server round trip for Word/HTML, this
-    /// stays entirely client-side: save first (same reasoning as ExportAsync's own doc comment - the
+    /// <summary>
+    /// Word export. Takes a different route to the HTML one above because Word ignores inline SVG,
+    /// which is how Helpers draw their charts: the live markup is rasterised here in the browser
+    /// (there's no canvas server-side) and POSTed to the converter, rather than the server reading
+    /// the saved copy. A by-product is that this always converts exactly what's on screen, so the
+    /// save below is about keeping the stored document current rather than about the download's
+    /// contents.
+    /// </summary>
+    private async Task ExportDocxAsync()
+    {
+        await SaveAsync();
+        if (_document is null) return;
+
+        _busy = true;
+        try
+        {
+            var editor = await GetModuleAsync();
+            var liveHtml = await editor.InvokeAsync<string>("getHtml", EditorId);
+
+            _actionsModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "/js/outputActions.js");
+            // The stylesheet is passed separately because this is a body fragment, not a styled
+            // document - without it a chart taking its colours from the stylesheet rasterises bare.
+            var prepared = await _actionsModule.InvokeAsync<RasterizedHtml>("rasterizeSvgs", liveHtml, GetSelectedCss() ?? "");
+
+            var fileName = $"{FileNameSanitizer.Sanitize(_title)}.docx";
+            var downloaded = await _actionsModule.InvokeAsync<bool>(
+                "postHtmlForDownload", $"/documents/{_document.Id}/export/docx", prepared.Html, fileName);
+
+            _statusMessage = downloaded
+                ? $"Word document downloaded.{DescribeGraphics(prepared)}"
+                : "Couldn't produce the Word document - nothing was downloaded.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>Only says anything when there were graphics to deal with - a text-only document
+    /// shouldn't get a sentence about charts appended to its download message.</summary>
+    private static string DescribeGraphics(RasterizedHtml prepared) => prepared switch
+    {
+        { Failed: > 0 } => $" {prepared.Converted} of {prepared.Converted + prepared.Failed} graphics became images - the rest couldn't be converted and won't appear in it.",
+        { Converted: 0 } => "",
+        { Converted: 1 } => " Its graphic was converted to an image so Word can show it.",
+        _ => $" Its {prepared.Converted} graphics were converted to images so Word can show them.",
+    };
+
+    /// <summary>PDF's export button - unlike the Word/HTML exports' server round trip, this
+    /// stays entirely client-side: save first (same reasoning as those - the
     /// export should reflect what's currently in the editor), then ask the SAME live preview iframe
     /// the user has been looking at to print itself via the browser's native print-to-PDF. This
     /// replaces the old PdfRenderer/PDFsharp-MigraDoc pipeline, which had to reconstruct the
@@ -261,7 +306,7 @@ else
             catch (JSDisconnectedException)
             {
                 // Circuit already gone (e.g. browser tab closed) - nothing to clean up. The
-                // ExportAsync forceLoad navigation doesn't reach this: a Content-Disposition:
+                // HTML export's forceLoad navigation doesn't reach this: a Content-Disposition:
                 // attachment response triggers a download without the browser unloading the
                 // current page, so the circuit survives it.
             }

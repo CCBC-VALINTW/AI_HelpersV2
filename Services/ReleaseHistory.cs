@@ -22,6 +22,11 @@ public static class ReleaseHistory
     // the time this entry was written), not a live clock.
     public static readonly IReadOnlyList<ReleaseNote> Releases =
     [
+        new("1.19", new DateTime(2026, 9, 10, 17, 30, 0),
+        [
+            "Charts now come through in the Word export too, as pictures, sized to fit the page - previously they were dropped from the .docx entirely (and their stray axis labels could end up scattered through the document as loose lines of text). The export tells you how many were converted, so a chart that couldn't be isn't a silent surprise when you open the file.",
+            "Word export now always contains exactly what the editor is showing, including edits you haven't saved yet."
+        ]),
         new("1.18", new DateTime(2026, 9, 10, 12, 0, 0),
         [
             "The version you're running is now shown at the bottom of the left-hand menu and links to these release notes - so it's clear which release each environment is on, rather than development, tester and live all looking alike.",
